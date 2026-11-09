@@ -19,18 +19,19 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 import threading
 import time
 from datetime import UTC, datetime
 from pathlib import Path
 
 import joblib
-import numpy as np
 import pandas as pd
 
 from app.core.config import Settings, get_settings
 from app.data.build_dataset import load_panel
 from app.montecarlo.calibration import calibrate_spot_vix
+from app.regime.artifacts import _clean, _json_default, write_json
 from app.regime.baseline import baseline_labels
 from app.regime.features import build_features
 from app.regime.hmm_model import RegimeModel, fit_regime_model, prob_column
@@ -50,33 +51,6 @@ class NotTrainedError(RuntimeError):
     """Raised when artifacts are requested before ``train()`` has run."""
 
 
-def _json_default(o):
-    if isinstance(o, np.integer):
-        return int(o)
-    if isinstance(o, np.floating):
-        return None if not np.isfinite(o) else float(o)
-    if isinstance(o, pd.Timestamp):
-        return o.date().isoformat()
-    if isinstance(o, np.ndarray):
-        return o.tolist()
-    raise TypeError(f"not JSON serialisable: {type(o)}")
-
-
-def _clean(o):
-    """Replace non-finite floats with None so the JSON is strict."""
-    if isinstance(o, dict):
-        return {k: _clean(v) for k, v in o.items()}
-    if isinstance(o, list | tuple):
-        return [_clean(v) for v in o]
-    if isinstance(o, float) and not np.isfinite(o):
-        return None
-    return o
-
-
-def write_json(path: Path, obj) -> None:
-    path.write_text(json.dumps(_clean(obj), indent=2, default=_json_default))
-
-
 def read_json(path: Path):
     if not path.exists():
         raise NotTrainedError(f"{path.name} missing: train the regime model first")
@@ -92,12 +66,16 @@ def train(settings: Settings | None = None, n_jobs: int = -1) -> dict:
 def _train(settings: Settings, n_jobs: int) -> dict:
     t0 = time.perf_counter()
     cfg = settings.regime
-    out = settings.regime_dir
-    out.mkdir(parents=True, exist_ok=True)
-    for old in out.glob("fold_*"):
-        old.unlink()
+    final = settings.regime_dir
+    # Build every artifact in a staging directory and swap it in only after success, so a
+    # failed or in-progress run never leaves a mix of old and new artifacts for the API.
+    out = final.with_name(final.name + ".staging")
+    if out.exists():
+        shutil.rmtree(out)
+    out.mkdir(parents=True)
 
-    feats = build_features(load_panel(), cfg)
+    panel = load_panel().set_index("date").sort_index()
+    feats = build_features(panel.reset_index(), cfg)
     hist, fold_meta, models = run_walk_forward(feats, cfg, out_dir=out, n_jobs=n_jobs)
     names = list(next(iter(models.values())).names)
 
@@ -121,9 +99,11 @@ def _train(settings: Settings, n_jobs: int) -> dict:
     live.to_parquet(out / "live.parquet")
 
     oos = hist[~hist["in_sample"]]
+    # Next-day pairs come from the full panel calendar, never from feature rows alone.
+    uvxy, vix = panel["uvxy_close"], panel["vix"]
     risk = {
-        "hmm": risk_stats_by_regime(oos["smoothed_label"], hist["uvxy_close"], names),
-        "baseline": risk_stats_by_regime(oos["baseline_label"], hist["uvxy_close"], names),
+        "hmm": risk_stats_by_regime(oos["smoothed_label"], uvxy, names),
+        "baseline": risk_stats_by_regime(oos["baseline_label"], uvxy, names),
         "empirical_transition": empirical_transition_matrix(oos["smoothed_label"], names)
         .round(6)
         .to_dict(orient="index"),
@@ -138,11 +118,11 @@ def _train(settings: Settings, n_jobs: int) -> dict:
         "model": "log-OU: d ln VIX = kappa (ln theta - ln VIX) dt + sigma dW, dt = 1/252",
         "source": "out-of-sample smoothed HMM labels",
         "all_days": calibrate_spot_vix(oos["vix"]),
-        "by_regime": regime_vix_params(oos["vix"], oos["smoothed_label"]),
+        "by_regime": regime_vix_params(vix, oos["smoothed_label"]),
     }
     write_json(out / "vix_params.json", vix_params)
 
-    validation = run_validation(hist, names, cfg)
+    validation = run_validation(hist, names, cfg, uvxy_close=uvxy)
     write_json(out / "validation.json", validation)
 
     summary = {
@@ -173,8 +153,20 @@ def _train(settings: Settings, n_jobs: int) -> dict:
         },
     }
     write_json(out / "train_summary.json", summary)
+    _swap_in(out, final)
     log.info("regime training done in %.1fs", summary["runtime_s"])
     return summary
+
+
+def _swap_in(staging: Path, final: Path) -> None:
+    backup = final.with_name(final.name + ".old")
+    if backup.exists():
+        shutil.rmtree(backup)
+    if final.exists():
+        final.rename(backup)
+    staging.rename(final)
+    if backup.exists():
+        shutil.rmtree(backup)
 
 
 # ---------------------------------------------------------------------------- loaders

@@ -210,6 +210,70 @@ def test_run_validation_on_walk_forward(wf) -> None:
     _, hist, _, _, _ = wf
     v = run_validation(hist, NAMES, CFG)
     assert v["oos_start"] > "2009-12-31"
-    assert {r["check"] for r in v["summary"]} >= {"Spike hit rate", "Flips per year (smoothed)"}
+    assert {r["check"] for r in v["summary"]} >= {
+        "Spike hit rate (days)",
+        "Flips per year (smoothed)",
+    }
     json.dumps(v)  # serialisable
     assert v["stability"]["hmm_smoothed_flips_per_year"] <= v["stability"]["hmm_raw_flips_per_year"]
+
+
+def test_walk_forward_has_no_look_ahead(wf) -> None:
+    """Appending later data must not change any earlier walk-forward output."""
+    feats, hist, _, _, _ = wf
+    cut = feats.index[feats.index <= "2011-06-30"]
+    short, _, _ = run_walk_forward(feats.loc[cut], CFG, out_dir=None, n_jobs=1)
+    cols = ["p_calm", "p_stressed", "p_panic"]
+    np.testing.assert_allclose(short[cols].to_numpy(), hist.loc[cut, cols].to_numpy(), atol=1e-10)
+    assert (short["smoothed_label"] == hist.loc[cut, "smoothed_label"]).all()
+
+
+def test_validation_oos_checks_ignore_in_sample_rows(wf) -> None:
+    _, hist, _, _, _ = wf
+    base = run_validation(hist, NAMES, CFG)
+    tampered = hist.copy()
+    ins = tampered["in_sample"]
+    tampered.loc[ins, "smoothed_label"] = "Panic"
+    tampered.loc[ins, "uvxy_close"] = tampered.loc[ins, "uvxy_close"] * 3
+    v = run_validation(tampered, NAMES, CFG)
+    for key in ("stability", "durations", "label_share", "calm_share_year"):
+        assert v[key] == base[key]
+
+
+def test_calibrate_by_regime_uses_full_calendar_for_next_level() -> None:
+    idx = pd.bdate_range("2020-01-01", periods=40)
+    vix = pd.Series(np.exp(np.linspace(2.5, 3.0, 40)), index=idx)
+    labels = pd.Series("Calm", index=idx[::2])  # every other day
+    out = calibrate_by_regime(vix, labels)
+    step = np.log(vix.iloc[1] / vix.iloc[0])
+    assert out["Calm"]["mean_daily_log_change"] == pytest.approx(step)
+
+
+def test_service_train_writes_full_artifact_set(tmp_path, monkeypatch) -> None:
+    from app.core.config import Settings
+    from app.regime import service
+
+    s = Settings(data_dir=tmp_path, regime=CFG)
+    panel = make_panel(n=1400, seed=5)
+    panel.attrs = {}
+    monkeypatch.setattr(service, "load_panel", lambda: panel.copy())
+    service.train(s, n_jobs=1)
+    names = {p.name for p in s.regime_dir.iterdir()}
+    assert {
+        "history.parquet",
+        "live.parquet",
+        "live_model.joblib",
+        "risk_stats.json",
+        "vix_params.json",
+        "validation.json",
+        "train_summary.json",
+    } <= names
+    assert any(n.startswith("fold_") and n.endswith(".json") for n in names)
+    assert not s.regime_dir.with_name("regime.staging").exists()
+    for f in s.regime_dir.glob("*.json"):
+        assert "NaN" not in f.read_text(), f.name
+        json.loads(f.read_text())
+    # Retrain replaces artifacts wholesale (no stale folds survive).
+    (s.regime_dir / "fold_1999-12-31.json").write_text("{}")
+    service.train(s, n_jobs=1)
+    assert not (s.regime_dir / "fold_1999-12-31.json").exists()

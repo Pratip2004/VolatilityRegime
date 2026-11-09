@@ -62,10 +62,12 @@ def calibrate_spot_vix(vix: pd.Series) -> dict:
 
 def calibrate_by_regime(vix: pd.Series, labels: pd.Series) -> dict[str, dict]:
     """Per-regime parameters using transitions (t → t+1) where the label at close ``t`` is the
-    regime. ``vix`` and ``labels`` share a trading-day index."""
-    df = pd.DataFrame({"vix": vix, "label": labels}).dropna()
-    nxt = df["vix"].shift(-1)
+    regime. ``vix`` should cover the full trading calendar: the next level is taken from it, so
+    a label subset never pairs non-adjacent days."""
+    nxt = vix.shift(-1).reindex(labels.index)
+    level = vix.reindex(labels.index)
     out = {}
-    for name, grp in df.groupby("label"):
-        out[str(name)] = calibrate_log_ou(grp["vix"].to_numpy(), nxt.loc[grp.index].to_numpy())
+    for name in pd.unique(labels.dropna()):
+        mask = (labels == name).to_numpy()
+        out[str(name)] = calibrate_log_ou(level.to_numpy()[mask], nxt.to_numpy()[mask])
     return out

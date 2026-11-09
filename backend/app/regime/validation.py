@@ -117,9 +117,16 @@ def spike_lead_time(labels: pd.Series, spikes: pd.Series) -> dict:
     }
 
 
-def run_validation(hist: pd.DataFrame, names: list[str], cfg: RegimeConfig) -> dict:
+def run_validation(
+    hist: pd.DataFrame,
+    names: list[str],
+    cfg: RegimeConfig,
+    uvxy_close: pd.Series | None = None,
+) -> dict:
     """``hist`` = walk-forward history (needs smoothed_label, raw_label, baseline_label,
-    in_sample, vix, uvxy_close)."""
+    in_sample, vix, uvxy_close). ``uvxy_close`` on the full trading calendar is preferred for
+    next-day returns; defaults to ``hist["uvxy_close"]``."""
+    close = hist["uvxy_close"] if uvxy_close is None else uvxy_close
     vcfg = cfg.validation
     sources = {"hmm": hist["smoothed_label"], "baseline": hist["baseline_label"]}
     oos = hist[~hist["in_sample"].astype(bool)]
@@ -136,7 +143,7 @@ def run_validation(hist: pd.DataFrame, names: list[str], cfg: RegimeConfig) -> d
             **{k: share_calm_in_year(v, vcfg.calm_year) for k, v in oos_sources.items()},
         },
         "economic_separation": {
-            k: risk_stats_by_regime(v, hist["uvxy_close"], names) for k, v in oos_sources.items()
+            k: risk_stats_by_regime(v, close, names) for k, v in oos_sources.items()
         },
         "durations": {k: duration_stats(v, names) for k, v in oos_sources.items()},
         "stability": {
@@ -201,6 +208,17 @@ def summarize(r: dict) -> list[dict]:
 
     add("Panic/Calm next-day std ratio", spread("hmm"), spread("baseline"), True)
     add("Calm next-day mean return", calm_mean("hmm"), calm_mean("baseline"), False)
+
+    def panic_minus_calm(src: str) -> float | None:
+        c, p = es[src].get("Calm", {}), es[src].get("Panic", {})
+        return p["mean"] - c["mean"] if c.get("count") and p.get("count") else None
+
+    add(
+        "Panic minus Calm next-day mean (expected > 0)",
+        panic_minus_calm("hmm"),
+        panic_minus_calm("baseline"),
+        True,
+    )
     st = r["stability"]
     add(
         "Flips per year (smoothed)",
@@ -209,7 +227,14 @@ def summarize(r: dict) -> list[dict]:
         False,
     )
     sl = r["spike_lead_time"]
-    add("Spike hit rate", sl["hmm"]["hit_rate"], sl["baseline"]["hit_rate"], True)
+    add("Spike hit rate (days)", sl["hmm"]["hit_rate"], sl["baseline"]["hit_rate"], True)
+    add(
+        "Spike hit rate (events)",
+        sl["hmm"]["event_hit_rate"],
+        sl["baseline"]["event_hit_rate"],
+        True,
+    )
+    add("Spike precision", sl["hmm"]["precision"], sl["baseline"]["precision"], True)
     add(
         "Spike false-alarm rate",
         sl["hmm"]["false_alarm_rate"],

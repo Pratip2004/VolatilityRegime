@@ -44,7 +44,7 @@ def risk_stats_by_regime(
     # label subset (e.g. out-of-sample only) never pairs a day with a non-adjacent close.
     df = pd.DataFrame({"label": labels})
     df["next_ret"] = next_day_returns(close).reindex(labels.index)
-    df["next_label"] = df["label"].shift(-1)
+    df["next_label"] = _next_on_calendar(labels, close.index)
     out: dict[str, dict] = {}
     for n in names:
         rows = df[df["label"] == n]
@@ -54,6 +54,11 @@ def risk_stats_by_regime(
         stats["next_regime_prob"] = {m: float((nl == m).mean()) if len(nl) else 0.0 for m in names}
         out[n] = stats
     return out
+
+
+def _next_on_calendar(labels: pd.Series, calendar: pd.Index) -> pd.Series:
+    """Label on the next trading day of ``calendar`` (NaN if that day is unlabelled)."""
+    return labels.reindex(calendar).shift(-1).reindex(labels.index)
 
 
 def empirical_transition_matrix(

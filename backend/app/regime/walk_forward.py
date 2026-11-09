@@ -11,7 +11,6 @@ dates separately.
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 from dataclasses import dataclass
@@ -22,6 +21,7 @@ import pandas as pd
 from joblib import Parallel, delayed
 
 from app.core.config import RegimeConfig
+from app.regime.artifacts import write_json
 from app.regime.baseline import baseline_labels
 from app.regime.hmm_model import RegimeModel, fit_regime_model, prob_column
 from app.regime.smoothing import days_in_regime, raw_labels, smooth_labels
@@ -82,7 +82,7 @@ def save_fold(model: RegimeModel, fold: Fold, out_dir: Path, runtime: float) -> 
         "runtime_s": round(runtime, 2),
         "transmat": model.transmat.tolist(),
     }
-    (out_dir / f"fold_{fold.fold_id}.json").write_text(json.dumps(meta, indent=2))
+    write_json(out_dir / f"fold_{fold.fold_id}.json", meta)
     return meta
 
 
