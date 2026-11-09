@@ -2,8 +2,8 @@
 
 Labels every trading day **Calm**, **Stressed** or **Panic**, with a probability for each, using
 only data available at that day's close. It then shows how large next-day UVXY moves have been in
-each regime. It tells you **how risky tomorrow is likely to be** (the range and size of the tails).
-That can inform position size, stop width and whether to hold overnight.
+each regime. It describes **how risky tomorrow is likely to be**: the typical range and the size
+of the tails.
 
 > It describes the **size** of likely moves, **not their direction**. It does not forecast UVXY,
 > place trades or give recommendations. Not investment advice.
@@ -53,7 +53,7 @@ Out-of-sample period: 2014-01-02 → 2026-11-06 (3,232 days). Results are in
   - Labels are far more stable: 11.8 flips per year versus 36.9 for the baseline. Spells have a
     median length of about 12–14 days, against 2–4 for the baseline.
   - It flags trouble earlier. It catches 64% of VIX-spike events (VIX up ≥ 30% within 5 days),
-    against 37% for the baseline, typically about 8 days in advance.
+    against 37% for the baseline (median 8.5 days flagged before an event).
 - **Where the baseline does better:**
   - The HMM labels **29% of days Panic**, against 15% for the baseline. This drives its false-alarm
     rate up: 59% of non-spike days are flagged, against 42%.
@@ -63,11 +63,12 @@ Out-of-sample period: 2014-01-02 → 2026-11-06 (3,232 days). Results are in
   **negative** (HMM −0.45%, baseline −0.43%), not positive. Panic days have much wider ranges (HMM
   std 9.8% versus 5.5% in Calm; 99th percentile +30% versus +20%). They do not have an upward
   drift, because UVXY tends to fall back after spikes.
-- **Ties:** every known stress episode (2008, 2010, 2011 in-sample; 2015, 2018, 2020, 2024
-  out-of-sample) is 100% flagged by both models. In 2017, 93% of days were labelled Calm by the HMM
+- **Ties:** both models flag 100% of days in every out-of-sample stress episode (2015, 2018,
+  2020, 2024). On the in-sample episodes (2008, 2010, 2011) the HMM flags 100% and the baseline
+  97% (92% of the 2010 flash crash). In 2017, 93% of days were labelled Calm by the HMM
   and 84% by the baseline.
 - **A modelling caveat:** the contango-based naming does not line up with risk perfectly. The
-  "Calm" state has slightly *higher* realized volatility than "Stressed", because contango
+  "Calm" state has about 40% *higher* realized volatility than "Stressed" (14.5% vs 10.3%), because contango
   mechanically widens as the front contract nears expiry.
 
 **Suggested next steps**, to be judged on a held-out period and not tuned on the out-of-sample
@@ -138,8 +139,9 @@ regime:
                              "lam": 3.79, "mu_j": 0.398, "sigma_j": 0.118}}}
 ```
 
-Send it as `model` + `overrides` to the simulator's `POST /api/simulate`. CORS allows the
-simulator's client (`http://localhost:5173`).
+Send it as `model` + `overrides` to the simulator's `POST /api/simulate`. The simulator's client
+can reach this API through a dev-server proxy; CORS also allows `http://localhost:5173` for direct
+calls.
 
 ## Limitations
 
@@ -154,4 +156,8 @@ simulator's client (`http://localhost:5173`).
   - VX1/VX2 are unadjusted front and second-month settlements, rolled the day before expiry.
   - UVXY's leverage changed from 2× to 1.5× in 2018, so return statistics mix both eras.
   - Free data sources (Cboe, FRED, Yahoo) can revise or briefly lag.
+- **Per-regime VIX parameters are rough.** Each regime's AR(1) is fitted only on that regime's
+  days, and the regime itself depends on the VIX level, which biases kappa and theta (long-run
+  levels barely differ: Calm 14.3, Stressed 15.5, Panic 14.4). The simulator then applies one
+  regime's dynamics for the whole horizon, although regimes switch.
 - **Small samples in the tails.** P(next-day move > +30%) rests on a handful of days per regime.
