@@ -32,13 +32,30 @@ export function NotAdviceNote() {
   )
 }
 
-export function PageHeader({ title, extra }: { title: ReactNode; extra?: ReactNode }) {
+export function PageHeader({
+  title,
+  subtitle,
+  extra,
+}: {
+  title: ReactNode
+  subtitle?: ReactNode
+  extra?: ReactNode
+}) {
   return (
-    <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+    <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
       <div>
-        <Typography.Title level={3} style={{ margin: 0 }}>
+        <Typography.Title
+          level={2}
+          className="font-display"
+          style={{ margin: 0, fontWeight: 700, fontFamily: 'var(--font-display)' }}
+        >
           {title}
         </Typography.Title>
+        {subtitle && (
+          <Text type="secondary" className="mt-1 block" style={{ fontSize: 14 }}>
+            {subtitle}
+          </Text>
+        )}
         <NotAdviceNote />
       </div>
       {extra}

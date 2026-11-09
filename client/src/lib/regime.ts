@@ -38,7 +38,14 @@ export function pct(x: number | null | undefined, digits = 1): string {
 export function signedPct(x: number | null | undefined, digits = 1): string {
   if (x === null || x === undefined || !Number.isFinite(x)) return '—'
   const s = (x * 100).toFixed(digits)
+  if (Number(s) === 0) return `${(0).toFixed(digits)}%` // no "-0.0%"
   return `${x > 0 ? '+' : ''}${s}%`
+}
+
+/** Price with thousands separators (split-adjusted UVXY can be in the hundreds of thousands). */
+export function price(x: number | null | undefined): string {
+  if (x === null || x === undefined || !Number.isFinite(x)) return '—'
+  return x.toLocaleString('en-US', { maximumFractionDigits: 2, minimumFractionDigits: 2 })
 }
 
 export function num(x: number | null | undefined, digits = 2): string {
@@ -137,4 +144,98 @@ export function orderedNames(keys: Iterable<string>): string[] {
 export function mostSevere(keys: Iterable<string>): string | undefined {
   const names = orderedNames(keys)
   return names.includes('Panic') ? 'Panic' : names[names.length - 1]
+}
+
+// ---------------------------------------------------------------- plain-English helpers
+
+/** "about 1 in 30 days" for a daily probability. */
+export function oneIn(p: number | null | undefined): string {
+  if (p === null || p === undefined || !Number.isFinite(p) || p <= 0) return 'almost never'
+  const n = Math.round(1 / p)
+  if (n <= 1) return 'most days'
+  return `about 1 in ${n} days`
+}
+
+export function days(n: number | null | undefined): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return '—'
+  const r = Math.round(n)
+  return `${r} trading day${r === 1 ? '' : 's'}`
+}
+
+/** How unusual a z-score is, in words. */
+export function zWords(z: number): string {
+  const a = Math.abs(z)
+  const dir = z >= 0 ? 'above' : 'below'
+  if (a < 0.5) return 'about normal'
+  if (a < 1.5) return `${dir} normal`
+  if (a < 2.5) return `well ${dir} normal`
+  return `extremely ${dir} normal`
+}
+
+// ---------------------------------------------------------------- CSV
+
+export function toCsv(rows: Record<string, unknown>[], columns: string[]): string {
+  const esc = (v: unknown) => {
+    if (v === null || v === undefined) return ''
+    const s = String(v)
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+  }
+  return [columns.join(','), ...rows.map((r) => columns.map((c) => esc(r[c])).join(','))].join('\n')
+}
+
+export function downloadCsv(filename: string, csv: string) {
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+// ---------------------------------------------------------------- explorer URL state
+
+export type ExplorerView = 'calendar' | 'table' | 'chart'
+
+export interface ExplorerFilters {
+  start: string
+  end: string
+  regimes: RegimeName[]
+  view: ExplorerView
+  day: string | null
+}
+
+const VIEWS: ExplorerView[] = ['calendar', 'table', 'chart']
+
+export function parseExplorerParams(
+  params: URLSearchParams,
+  defaults: { start: string; end: string },
+): ExplorerFilters {
+  const iso = /^\d{4}-\d{2}-\d{2}$/
+  const start = params.get('start') ?? ''
+  const end = params.get('end') ?? ''
+  const regimes = (params.get('regimes') ?? '')
+    .split(',')
+    .filter((r): r is RegimeName => (REGIME_NAMES as string[]).includes(r))
+  const view = params.get('view') as ExplorerView
+  const day = params.get('day') ?? ''
+  return {
+    start: iso.test(start) ? start : defaults.start,
+    end: iso.test(end) ? end : defaults.end,
+    regimes: regimes.length ? regimes : [...REGIME_NAMES],
+    view: VIEWS.includes(view) ? view : 'calendar',
+    day: iso.test(day) ? day : null,
+  }
+}
+
+export function explorerHref(f: Partial<ExplorerFilters>): string {
+  const p = new URLSearchParams()
+  if (f.start) p.set('start', f.start)
+  if (f.end) p.set('end', f.end)
+  if (f.regimes && f.regimes.length && f.regimes.length < REGIME_NAMES.length) {
+    p.set('regimes', f.regimes.join(','))
+  }
+  if (f.view && f.view !== 'calendar') p.set('view', f.view)
+  if (f.day) p.set('day', f.day)
+  const qs = p.toString()
+  return `/explorer${qs ? `?${qs}` : ''}`
 }

@@ -63,7 +63,10 @@ from a 3-state Gaussian HMM on term-structure and volatility features, using fil
 (no-look-ahead) probabilities, walk-forward training and hysteresis smoothing.
 
 - Backend: `backend/app/regime/` (`features.py`, `hmm_model.py`, `smoothing.py`, `baseline.py`,
-  `walk_forward.py`, `risk_stats.py`, `validation.py`, `service.py`), routes in
+  `walk_forward.py`, `risk_stats.py`, `validation.py`, `insights.py`, `service.py`), routes in
   `backend/app/api/routes/regime.py` under `/api/regime`, tests in `backend/tests/regime/`.
-- Frontend pages: `client/src/pages/RegimeTodayPage.tsx`, `client/src/pages/RegimeHistoryPage.tsx`,
-  `client/src/pages/RegimeDiagnosticsPage.tsx` (Sider menu group "Regime").
+- Frontend pages (Sider menu group "Regime"): `client/src/pages/RegimeTodayPage.tsx` (Overview, `/`),
+  `client/src/pages/RegimeHistoryPage.tsx` (Explorer, `/explorer`),
+  `client/src/pages/RegimeInsightsPage.tsx` (Insights, `/insights`) and
+  `client/src/pages/RegimeDiagnosticsPage.tsx` (Model details, `/model`). User-facing pages use HMM
+  labels only; the baseline comparison lives in Model details.

@@ -98,6 +98,8 @@ export interface HistoryRow {
   vix: number
   contango: number
   uvxy_close: number | null
+  days_in_regime: number
+  uvxy_next_ret: number | null
 }
 
 export interface RegimeHistory {
@@ -225,4 +227,60 @@ export interface FoldInfo extends FoldSummary {
   features: string[]
   label_contango: Record<string, number>
   transmat: number[][] | null
+}
+
+export interface RegimeEpisode {
+  regime: RegimeName
+  start: string
+  end: string
+  days: number
+  ongoing: boolean
+  in_sample: boolean
+  previous_regime: RegimeName | null
+  next_regime: RegimeName | null
+  vix_start: number | null
+  vix_peak: number | null
+  vix_end: number | null
+  uvxy_change: number | null
+  spx_change: number | null
+}
+
+export interface CurrentSpell extends RegimeEpisode {
+  longer_than_share: number | null
+  continued_share: number | null
+}
+
+export interface RegimeProfile {
+  share_of_days: number
+  days: number
+  spells: number
+  spell_median: number | null
+  spell_mean: number | null
+  spell_p75: number | null
+  spell_p90: number | null
+  spell_max: number | null
+  spell_lengths: number[]
+  exit_to: Probabilities
+  vix_median: number | null
+  vix_p10: number | null
+  vix_p90: number | null
+  contango_median: number | null
+  risk: RiskStats
+}
+
+export interface YearShare {
+  year: number
+  days: number
+  in_sample: boolean
+  shares: Probabilities
+}
+
+export interface RegimeInsights {
+  names: RegimeName[]
+  as_of: string
+  oos_start: string | null
+  profiles: Record<string, RegimeProfile>
+  current: CurrentSpell
+  episodes: RegimeEpisode[]
+  yearly: YearShare[]
 }

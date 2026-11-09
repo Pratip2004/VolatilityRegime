@@ -12,7 +12,24 @@ const queryClient = new QueryClient({
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ConfigProvider theme={{ token: { colorPrimary: '#1677ff', borderRadius: 8 } }}>
+    <ConfigProvider
+      theme={{
+        token: {
+          colorPrimary: '#3b3aa8',
+          colorText: '#14161b',
+          colorTextSecondary: '#4b5160',
+          colorBorder: '#e3e6eb',
+          colorBorderSecondary: '#e3e6eb',
+          colorBgLayout: '#f4f5f7',
+          borderRadius: 8,
+          fontFamily: "'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif",
+        },
+        components: {
+          Table: { headerBg: '#f8f9fb', headerColor: '#4b5160', rowHoverBg: '#f6f7fb' },
+          Menu: { itemSelectedBg: '#ecebfa', itemSelectedColor: '#3b3aa8' },
+        },
+      }}
+    >
       <AntApp>
         <QueryClientProvider client={queryClient}>
           <BrowserRouter>

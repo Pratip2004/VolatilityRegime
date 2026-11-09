@@ -42,6 +42,29 @@ Full spec: [`docs/REGIME_DETECTOR.md`](docs/REGIME_DETECTOR.md). Project convent
 A simple rule-based **baseline** is reported alongside every check for comparison: Panic if
 VX1 > VX2; Calm if contango > 5% and VIX/VIX3M < 0.95; otherwise Stressed.
 
+## Using the app
+
+Open http://localhost:5174 (see *Running it* below). Four pages:
+
+- **Overview:** today's regime in plain English, with:
+  - how confident the model is;
+  - tomorrow's typical UVXY range for this regime;
+  - how long this spell usually lasts and what usually follows it;
+  - a ribbon of every trading day since 2008;
+  - the readings the model is using.
+- **Explorer:** every trading day's regime as a calendar, a table or charts.
+  - Filter by the Calm / Stressed / Panic tags and by date range; the filters are saved in the URL,
+    so views can be shared.
+  - Click any day for its details and the spell it belonged to.
+  - Export the filtered days as CSV.
+- **Insights:** the three regimes side by side, then a deep dive into one:
+  - the next-day move distribution;
+  - spell lengths, and what comes after a spell ends;
+  - every past episode with its VIX peak and UVXY/S&P change (click to open it in the Explorer);
+  - time spent in each regime by year.
+- **Model details:** for checking the engine. It covers the transition matrix, state means,
+  validation and HMM vs baseline.
+
 ## What the validation found
 
 Out-of-sample period: 2014-01-02 → 2026-11-06 (3,232 days). Results are in

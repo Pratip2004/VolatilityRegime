@@ -25,6 +25,7 @@ describe('regime helpers', () => {
     expect(signedPct(-0.05)).toBe('-5.0%')
     expect(pct(null)).toBe('—')
     expect(signedPct(Number.NaN)).toBe('—')
+    expect(signedPct(-0.0001, 0)).toBe('0%')
   })
 
   it('shows VVIX in levels and contango as a signed percent', () => {

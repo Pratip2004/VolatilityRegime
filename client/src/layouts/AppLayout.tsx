@@ -1,13 +1,9 @@
-import {
-  BarChartOutlined,
-  DashboardOutlined,
-  ExperimentOutlined,
-  LineChartOutlined,
-} from '@ant-design/icons'
-import { Layout, Menu, Typography } from 'antd'
+import { BulbOutlined, CalendarOutlined, HomeOutlined, SettingOutlined } from '@ant-design/icons'
+import { Layout, Menu } from 'antd'
 import type { MenuProps } from 'antd'
 import { useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { REGIME_NAMES, regimeColor } from '../lib/regime'
 
 const { Sider, Content } = Layout
 
@@ -17,12 +13,24 @@ const items: MenuProps['items'] = [
     key: 'regime',
     label: 'Regime',
     children: [
-      { key: '/regime/today', icon: <DashboardOutlined />, label: 'Today' },
-      { key: '/regime/history', icon: <LineChartOutlined />, label: 'History' },
-      { key: '/regime/diagnostics', icon: <ExperimentOutlined />, label: 'Diagnostics' },
+      { key: '/', icon: <HomeOutlined />, label: 'Overview' },
+      { key: '/explorer', icon: <CalendarOutlined />, label: 'Explorer' },
+      { key: '/insights', icon: <BulbOutlined />, label: 'Insights' },
+      { key: '/model', icon: <SettingOutlined />, label: 'Model details' },
     ],
   },
 ]
+
+/** Three-stripe mark in the regime colours. */
+function Mark() {
+  return (
+    <span className="inline-flex h-5 items-end gap-0.5" aria-hidden>
+      {REGIME_NAMES.map((n, i) => (
+        <span key={n} style={{ width: 4, height: 8 + i * 5, background: regimeColor(n), borderRadius: 1 }} />
+      ))}
+    </span>
+  )
+}
 
 export function AppLayout() {
   const navigate = useNavigate()
@@ -36,15 +44,19 @@ export function AppLayout() {
         collapsed={collapsed}
         onCollapse={setCollapsed}
         breakpoint="lg"
-        width={220}
-        style={{ borderRight: '1px solid #f0f0f0' }}
+        width={212}
+        style={{ borderRight: '1px solid var(--rule)' }}
       >
-        <div className="flex items-center gap-2 px-5 py-4">
-          <BarChartOutlined style={{ fontSize: 20, color: '#1677ff' }} />
+        <div className="flex items-center gap-2.5 px-5 py-5">
+          <Mark />
           {!collapsed && (
-            <Typography.Text strong style={{ fontSize: 16 }}>
-              UVXY Risk
-            </Typography.Text>
+            <span className="font-display text-[17px] font-bold leading-tight">
+              UVXY Regime
+              <br />
+              <span className="text-xs font-medium" style={{ color: 'var(--ink-3)' }}>
+                volatility monitor
+              </span>
+            </span>
           )}
         </div>
         <Menu
@@ -56,7 +68,7 @@ export function AppLayout() {
         />
       </Sider>
       <Layout>
-        <Content className="p-4 md:p-6" style={{ maxWidth: 1400, width: '100%' }}>
+        <Content className="px-4 py-5 md:px-8 md:py-7" style={{ maxWidth: 1360, width: '100%' }}>
           <Outlet />
         </Content>
       </Layout>

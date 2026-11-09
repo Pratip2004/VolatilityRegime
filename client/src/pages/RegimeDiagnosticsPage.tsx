@@ -26,7 +26,8 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { useRegimeDiagnostics, useRegimeHindsight } from '../api/regime'
+import { useRegimeDiagnostics, useRegimeHindsight, useRegimeHistory } from '../api/regime'
+import { RegimeRibbon } from '../components/RegimeRibbon'
 import { PageState } from '../components/PageState'
 import { PageHeader, RegimeTag } from '../components/RegimeBits'
 import { ReturnBoxPlot } from '../components/ReturnBoxPlot'
@@ -57,7 +58,10 @@ export default function RegimeDiagnosticsPage() {
   const q = useRegimeDiagnostics()
   return (
     <div>
-      <PageHeader title="Regime diagnostics" />
+      <PageHeader
+        title="Model details"
+        subtitle="For checking the engine: fitted parameters, validation against known episodes, and how the HMM compares with a simple rule-based baseline."
+      />
       <PageState isLoading={q.isLoading} error={q.error} onRetry={() => q.refetch()}>
         {q.data && <Diagnostics d={q.data} />}
       </PageState>
@@ -82,6 +86,7 @@ function Diagnostics({ d }: { d: RegimeDiagnostics }) {
         </Col>
       </Row>
       <ComparisonCard rows={v.summary} spikes={v.spike_lead_time} stability={v.stability} />
+      <BaselineRibbons />
       <EpisodesCard episodes={v.known_episodes} calm={v.calm_share_year} />
       <RiskCard d={d} />
       <DurationCard d={d} />
@@ -101,7 +106,7 @@ function Diagnostics({ d }: { d: RegimeDiagnostics }) {
 /** Single-hue sequential shading (light → dark blue) for probabilities. */
 function probShade(p: number) {
   const a = 0.08 + 0.72 * Math.max(0, Math.min(1, p))
-  return { background: `rgba(22, 119, 255, ${a.toFixed(3)})`, color: p > 0.55 ? '#fff' : undefined }
+  return { background: `rgba(59, 58, 168, ${a.toFixed(3)})`, color: p > 0.55 ? '#fff' : undefined }
 }
 
 function TransitionCard({ d }: { d: RegimeDiagnostics }) {
@@ -576,3 +581,27 @@ function HindsightPanel() {
   )
 }
 
+
+/** HMM vs baseline labels for the same days, as two aligned ribbons. */
+function BaselineRibbons() {
+  const q = useRegimeHistory()
+  const rows = useMemo(() => q.data?.rows ?? [], [q.data])
+  if (!rows.length) return null
+  return (
+    <Card title="HMM vs baseline labels, day by day" size="small">
+      <Space direction="vertical" className="w-full" size="middle">
+        <div>
+          <div className="eyebrow mb-1">HMM (smoothed) — used everywhere else in the app</div>
+          <RegimeRibbon days={rows.map((r) => ({ date: r.date, label: r.smoothed_label }))} height={28} showYears={false} />
+        </div>
+        <div>
+          <div className="eyebrow mb-1">Baseline rules (VX1 &gt; VX2 = Panic; contango &gt; 5% and VIX/VIX3M &lt; 0.95 = Calm)</div>
+          <RegimeRibbon days={rows.map((r) => ({ date: r.date, label: r.baseline_label }))} height={28} />
+        </div>
+        <Text type="secondary" className="text-xs">
+          The baseline flips far more often; the HMM holds regimes longer but labels more days Panic.
+        </Text>
+      </Space>
+    </Card>
+  )
+}

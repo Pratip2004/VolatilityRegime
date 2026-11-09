@@ -1,7 +1,9 @@
-import { Alert, Card, DatePicker, Empty, Segmented, Space, Typography } from 'antd'
-import type { TimeRangePickerProps } from 'antd'
-import dayjs, { type Dayjs } from 'dayjs'
-import { useMemo, useState } from 'react'
+import { DownloadOutlined } from '@ant-design/icons'
+import { Button, DatePicker, Segmented, Space, Table, Tag, Typography } from 'antd'
+import type { TableColumnsType, TimeRangePickerProps } from 'antd'
+import dayjs from 'dayjs'
+import { useMemo } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   Area,
   AreaChart,
@@ -9,216 +11,328 @@ import {
   Line,
   LineChart,
   ReferenceArea,
-  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from 'recharts'
-import { useRegimeHistory } from '../api/regime'
+import { useRegimeHistory, useRegimeInsights } from '../api/regime'
+import { CalendarHeatmap } from '../components/CalendarHeatmap'
+import { DayDrawer } from '../components/DayDrawer'
 import { PageState } from '../components/PageState'
-import { PageHeader, RegimeLegend } from '../components/RegimeBits'
+import { PageHeader, RegimeTag } from '../components/RegimeBits'
+import { RegimeRibbon } from '../components/RegimeRibbon'
 import {
   REGIME_BAND_FILL_OPACITY,
-  orderedNames,
+  REGIME_NAMES,
+  downloadCsv,
   labelSpans,
   num,
+  parseExplorerParams,
   pct,
+  price,
   regimeColor,
   signedPct,
+  toCsv,
+  type ExplorerFilters,
+  type ExplorerView,
   type Span,
 } from '../lib/regime'
-import type { HistoryRow } from '../types/regime'
+import type { HistoryRow, RegimeEpisode, RegimeName } from '../types/regime'
 
 const { RangePicker } = DatePicker
 const { Text } = Typography
 
-type LabelSource = 'hmm' | 'baseline'
+const AXIS_TICK = { fontSize: 11, fill: '#7a8191' }
+const GRID = '#eef0f3'
 
-function makePresets(): TimeRangePickerProps['presets'] {
-  const now = dayjs()
-  return [
-    { label: '1Y', value: [now.subtract(1, 'year'), now] },
-    { label: '3Y', value: [now.subtract(3, 'year'), now] },
-    { label: '5Y', value: [now.subtract(5, 'year'), now] },
-    { label: 'All', value: [dayjs('2008-01-01'), now] },
+export default function RegimeExplorerPage() {
+  const q = useRegimeHistory()
+  const insights = useRegimeInsights()
+  const [params, setParams] = useSearchParams()
+
+  const all = useMemo(() => q.data?.rows ?? [], [q.data])
+  const first = all[0]?.date ?? '2008-01-01'
+  const last = all[all.length - 1]?.date ?? dayjs().format('YYYY-MM-DD')
+  const f = parseExplorerParams(params, {
+    start: dayjs(last).subtract(3, 'year').format('YYYY-MM-DD'),
+    end: last,
+  })
+
+  const update = (patch: Partial<ExplorerFilters>) => {
+    const next = { ...f, ...patch }
+    const p = new URLSearchParams()
+    p.set('start', next.start)
+    p.set('end', next.end)
+    if (next.regimes.length < REGIME_NAMES.length) p.set('regimes', next.regimes.join(','))
+    if (next.view !== 'calendar') p.set('view', next.view)
+    if (next.day) p.set('day', next.day)
+    setParams(p, { replace: true })
+  }
+
+  const inRange = useMemo(() => all.filter((r) => r.date >= f.start && r.date <= f.end), [all, f.start, f.end])
+  const shown = useMemo(
+    () => inRange.filter((r) => f.regimes.includes(r.smoothed_label)),
+    [inRange, f.regimes],
+  )
+  const counts = useMemo(() => {
+    const c: Record<string, number> = {}
+    inRange.forEach((r) => (c[r.smoothed_label] = (c[r.smoothed_label] ?? 0) + 1))
+    return c
+  }, [inRange])
+
+  const dayRow = f.day ? all.find((r) => r.date === f.day) ?? null : null
+  const dayEpisode =
+    f.day && insights.data
+      ? insights.data.episodes.find((e) => e.start <= f.day! && e.end >= f.day!) ?? null
+      : null
+
+  const presets: TimeRangePickerProps['presets'] = [
+    { label: 'Last month', value: [dayjs(last).subtract(1, 'month'), dayjs(last)] },
+    { label: 'Last 3 months', value: [dayjs(last).subtract(3, 'month'), dayjs(last)] },
+    { label: '1Y', value: [dayjs(last).subtract(1, 'year'), dayjs(last)] },
+    { label: '3Y', value: [dayjs(last).subtract(3, 'year'), dayjs(last)] },
+    { label: '5Y', value: [dayjs(last).subtract(5, 'year'), dayjs(last)] },
+    { label: 'All', value: [dayjs(first), dayjs(last)] },
   ]
-}
 
-const fmtDate = (d: string) => dayjs(d).format('MMM YY')
-const GRID = '#f0f0f0'
-const AXIS_TICK = { fontSize: 11, fill: '#8c8c8c' }
+  const toggleRegime = (n: RegimeName, on: boolean) => {
+    const next = on ? [...f.regimes, n] : f.regimes.filter((r) => r !== n)
+    if (next.length) update({ regimes: REGIME_NAMES.filter((r) => next.includes(r)) })
+  }
 
-export default function RegimeHistoryPage() {
-  const [range, setRange] = useState<[Dayjs, Dayjs]>([dayjs().subtract(3, 'year'), dayjs()])
-  const [source, setSource] = useState<LabelSource>('hmm')
-  const start = range[0].format('YYYY-MM-DD')
-  const end = range[1].format('YYYY-MM-DD')
-  const q = useRegimeHistory(start, end)
-
-  const rows = useMemo(() => q.data?.rows ?? [], [q.data])
-  const labelOf = (r: HistoryRow) => (source === 'hmm' ? r.smoothed_label : r.baseline_label)
-  const spans = useMemo(
-    () => labelSpans(rows, (r) => r.date, source === 'hmm' ? (r) => r.smoothed_label : (r) => r.baseline_label),
-    [rows, source],
-  )
-  const names = useMemo(() => orderedNames(q.data?.names ?? []), [q.data])
-  const chartRows = useMemo(
-    () =>
-      rows.map((r) => ({
-        ...r,
-        ...Object.fromEntries(names.map((n) => [probKey(n), r.probabilities[n] ?? 0])),
-      })),
-    [rows, names],
-  )
-  const uvxyDomain = useMemo(() => {
-    const v = rows.map((r) => r.uvxy_close).filter((x): x is number => x !== null && x > 0)
-    return v.length ? [Math.min(...v) * 0.9, Math.max(...v) * 1.1] : null
-  }, [rows])
-  const oosStart = rows.find((r) => !r.in_sample)?.date
-  const hasInSample = rows.some((r) => r.in_sample)
+  const exportCsv = () => {
+    const rows = shown.map((r) => ({
+      date: r.date,
+      regime: r.smoothed_label,
+      day_of_spell: r.days_in_regime,
+      p_calm: r.probabilities.Calm?.toFixed(4),
+      p_stressed: r.probabilities.Stressed?.toFixed(4),
+      p_panic: r.probabilities.Panic?.toFixed(4),
+      vix: r.vix,
+      contango: r.contango.toFixed(4),
+      uvxy_close: r.uvxy_close,
+      uvxy_next_day_return: r.uvxy_next_ret?.toFixed(4) ?? '',
+      in_sample: r.in_sample,
+    }))
+    downloadCsv(
+      `regimes_${f.start}_${f.end}.csv`,
+      toCsv(rows, Object.keys(rows[0] ?? { date: '' })),
+    )
+  }
 
   return (
     <div>
-      <PageHeader title="Regime history" />
-      <Card className="mb-4" size="small">
-        <Space wrap size="large">
+      <PageHeader
+        title="Regime explorer"
+        subtitle="Every trading day's regime. Filter by regime and date, then click a day for details."
+      />
+
+      <div className="panel sticky top-0 z-20 mb-4 p-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <Space size={6} wrap aria-label="Filter by regime">
+            {REGIME_NAMES.map((n) => {
+              const on = f.regimes.includes(n)
+              return (
+                <Tag.CheckableTag
+                  key={n}
+                  checked={on}
+                  onChange={(c) => toggleRegime(n, c)}
+                  style={{
+                    border: `1px solid ${on ? regimeColor(n) : 'var(--rule)'}`,
+                    background: on ? `${regimeColor(n)}1f` : 'transparent',
+                    color: 'var(--ink)',
+                    padding: '3px 10px',
+                    fontSize: 13,
+                  }}
+                  data-testid={`filter-${n}`}
+                >
+                  <span style={{ color: on ? regimeColor(n) : 'var(--ink-3)' }}>●</span> {n}{' '}
+                  <span className="num" style={{ color: 'var(--ink-3)' }}>
+                    {counts[n] ?? 0}
+                  </span>
+                </Tag.CheckableTag>
+              )
+            })}
+          </Space>
           <RangePicker
-            value={range}
-            presets={makePresets()}
+            value={[dayjs(f.start), dayjs(f.end)]}
+            presets={presets}
             allowClear={false}
-            onChange={(v) => v && v[0] && v[1] && setRange([v[0], v[1]])}
-            disabledDate={(d) => d.isAfter(dayjs()) || d.isBefore(dayjs('2008-01-01'))}
+            onChange={(v) =>
+              v?.[0] && v[1] && update({ start: v[0].format('YYYY-MM-DD'), end: v[1].format('YYYY-MM-DD') })
+            }
+            disabledDate={(d) => d.isAfter(dayjs(last)) || d.isBefore(dayjs(first))}
+            aria-label="Date range"
           />
-          <Segmented<LabelSource>
-            value={source}
-            onChange={setSource}
+          <Segmented<ExplorerView>
+            value={f.view}
+            onChange={(view) => update({ view })}
             options={[
-              { label: 'HMM (smoothed)', value: 'hmm' },
-              { label: 'Baseline rules', value: 'baseline' },
+              { label: 'Calendar', value: 'calendar' },
+              { label: 'Table', value: 'table' },
+              { label: 'Chart', value: 'chart' },
             ]}
           />
-          <RegimeLegend />
-        </Space>
-      </Card>
+          <Button icon={<DownloadOutlined />} onClick={exportCsv} disabled={!shown.length}>
+            Export CSV
+          </Button>
+        </div>
+      </div>
 
       <PageState
         isLoading={q.isLoading}
         error={q.error}
-        isEmpty={rows.length === 0}
+        isEmpty={!q.isLoading && all.length === 0}
         onRetry={() => q.refetch()}
       >
-        <Space direction="vertical" size="large" className="w-full">
-          {hasInSample && (
-            <Alert
-              type="info"
-              showIcon
-              message={`Dates before ${oosStart ?? '2014'} are in-sample`}
-              description="They fall inside the first training window (2008–2013). Later dates are out-of-sample walk-forward labels."
+        <div className="panel mb-4 p-4">
+          <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+            <Text data-testid="range-summary">
+              <span className="num">{inRange.length.toLocaleString()}</span> trading days from{' '}
+              <span className="num">{dayjs(f.start).format('D MMM YYYY')}</span> to{' '}
+              <span className="num">{dayjs(f.end).format('D MMM YYYY')}</span>
+              {shown.length !== inRange.length && (
+                <>
+                  {' '}· showing <span className="num">{shown.length.toLocaleString()}</span>
+                </>
+              )}
+            </Text>
+            <Space size="middle" wrap>
+              {REGIME_NAMES.map((n) => (
+                <Text key={n} type="secondary">
+                  <span style={{ color: regimeColor(n) }}>●</span> {n}{' '}
+                  <span className="num">{pct((counts[n] ?? 0) / Math.max(inRange.length, 1), 0)}</span>
+                </Text>
+              ))}
+            </Space>
+          </div>
+          <RegimeRibbon
+            days={inRange.map((r) => ({ date: r.date, label: r.smoothed_label }))}
+            height={28}
+            onSelect={(day) => update({ day })}
+          />
+        </div>
+
+        {inRange.length === 0 ? (
+          <div className="panel p-8 text-center">
+            <Text type="secondary">No trading days in this range. Pick a wider range above.</Text>
+          </div>
+        ) : f.view === 'calendar' ? (
+          <div className="panel p-4">
+            <CalendarHeatmap
+              rows={inRange}
+              regimes={f.regimes}
+              selectedDay={f.day}
+              onSelect={(day) => update({ day })}
             />
-          )}
-          <Card title={`VIX with ${source === 'hmm' ? 'HMM' : 'baseline'} regime bands`} size="small">
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={chartRows} syncId="regime" margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
-                <CartesianGrid stroke={GRID} vertical={false} />
-                <XAxis dataKey="date" tickFormatter={fmtDate} minTickGap={40} tick={AXIS_TICK} />
-                <YAxis tick={AXIS_TICK} width={64} domain={[0, 'auto']} />
-                {bands(spans)}
-                {oosStart && hasInSample && oosLine(oosStart)}
-                <Tooltip content={<RowTooltip labelOf={labelOf} kind="vix" />} />
-                <Line
-                  dataKey="vix"
-                  stroke="#1f2937"
-                  strokeWidth={1.5}
-                  dot={false}
-                  isAnimationActive={false}
-                  name="VIX"
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </Card>
+          </div>
+        ) : f.view === 'table' ? (
+          <DayTable rows={shown} onSelect={(day) => update({ day })} />
+        ) : (
+          <ChartView rows={inRange} />
+        )}
 
-          <Card title="Filtered regime probabilities (HMM, no look-ahead)" size="small">
-            <ResponsiveContainer width="100%" height={220}>
-              <AreaChart data={chartRows} syncId="regime" margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
-                <CartesianGrid stroke={GRID} vertical={false} />
-                <XAxis dataKey="date" tickFormatter={fmtDate} minTickGap={40} tick={AXIS_TICK} />
-                <YAxis
-                  tick={AXIS_TICK}
-                  width={64}
-                  domain={[0, 1]}
-                  ticks={[0, 0.25, 0.5, 0.75, 1]}
-                  tickFormatter={(v: number) => `${Math.round(v * 100)}%`}
-                />
-                <Tooltip content={<RowTooltip labelOf={labelOf} kind="probs" />} />
-                {names.map((n) => (
-                  <Area
-                    key={n}
-                    dataKey={probKey(n)}
-                    name={n}
-                    stackId="p"
-                    stroke={regimeColor(n)}
-                    fill={regimeColor(n)}
-                    fillOpacity={0.75}
-                    strokeWidth={0}
-                    isAnimationActive={false}
-                  />
-                ))}
-              </AreaChart>
-            </ResponsiveContainer>
-          </Card>
-
-          <Card title="UVXY (split-adjusted, log scale) with regime bands" size="small">
-            {uvxyDomain === null ? (
-              <Empty description="No UVXY prices in this range (UVXY launched on 2011-10-04)." />
-            ) : (
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={chartRows} syncId="regime" margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
-                <CartesianGrid stroke={GRID} vertical={false} />
-                <XAxis dataKey="date" tickFormatter={fmtDate} minTickGap={40} tick={AXIS_TICK} />
-                <YAxis
-                  scale="log"
-                  domain={uvxyDomain}
-                  tick={AXIS_TICK}
-                  width={64}
-                  tickFormatter={(v: number) => compact(v)}
-                />
-                {bands(spans)}
-                <Tooltip content={<RowTooltip labelOf={labelOf} kind="uvxy" />} />
-                <Line
-                  dataKey="uvxy_close"
-                  stroke="#1f2937"
-                  strokeWidth={1.5}
-                  dot={false}
-                  isAnimationActive={false}
-                  name="UVXY"
-                />
-              </LineChart>
-            </ResponsiveContainer>
-            )}
-            {uvxyDomain !== null && rows.some((r) => r.uvxy_close === null) && (
-              <Text type="secondary" className="text-xs">
-                UVXY launched on 2011-10-04; earlier dates have no UVXY price.
-              </Text>
-            )}
-          </Card>
-        </Space>
+        {shown.length === 0 && inRange.length > 0 && (
+          <Text type="secondary" className="mt-2 block">
+            No {f.regimes.join(' / ')} days in this range.
+          </Text>
+        )}
       </PageState>
+
+      <DayDrawer row={dayRow} episode={dayEpisode as RegimeEpisode | null} onClose={() => update({ day: null })} />
     </div>
   )
 }
 
-function probKey(name: string) {
-  return `p_${name.toLowerCase()}`
+function ProbBar({ p }: { p: Record<string, number> }) {
+  return (
+    <div className="flex h-2 w-24 overflow-hidden rounded-sm" aria-hidden>
+      {REGIME_NAMES.map((n) => (
+        <div key={n} style={{ width: `${(p[n] ?? 0) * 100}%`, background: regimeColor(n) }} />
+      ))}
+    </div>
+  )
 }
 
-function compact(v: number) {
-  return new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(v)
+function DayTable({ rows, onSelect }: { rows: HistoryRow[]; onSelect: (d: string) => void }) {
+  const data = useMemo(() => [...rows].reverse(), [rows])
+  const columns: TableColumnsType<HistoryRow> = [
+    {
+      title: 'Date',
+      dataIndex: 'date',
+      sorter: (a, b) => a.date.localeCompare(b.date),
+      render: (d: string) => <span className="num">{dayjs(d).format('ddd D MMM YYYY')}</span>,
+    },
+    {
+      title: 'Regime',
+      dataIndex: 'smoothed_label',
+      render: (n: string) => <RegimeTag name={n} />,
+    },
+    {
+      title: 'Day of spell',
+      dataIndex: 'days_in_regime',
+      align: 'right',
+      sorter: (a, b) => a.days_in_regime - b.days_in_regime,
+      render: (x: number) => <span className="num">{x}</span>,
+    },
+    {
+      title: 'Probabilities',
+      key: 'p',
+      render: (_, r) => (
+        <Space size={8}>
+          <ProbBar p={r.probabilities} />
+          <span className="num text-xs" style={{ color: 'var(--ink-3)' }}>
+            {pct(r.probabilities[r.smoothed_label], 0)}
+          </span>
+        </Space>
+      ),
+    },
+    {
+      title: 'VIX',
+      dataIndex: 'vix',
+      align: 'right',
+      sorter: (a, b) => a.vix - b.vix,
+      render: (x: number) => <span className="num">{num(x)}</span>,
+    },
+    {
+      title: 'Contango',
+      dataIndex: 'contango',
+      align: 'right',
+      sorter: (a, b) => a.contango - b.contango,
+      render: (x: number) => <span className="num">{signedPct(x, 1)}</span>,
+    },
+    {
+      title: 'UVXY (adj.)',
+      dataIndex: 'uvxy_close',
+      align: 'right',
+      render: (x: number | null) => <span className="num">{price(x)}</span>,
+    },
+    {
+      title: 'UVXY next day',
+      dataIndex: 'uvxy_next_ret',
+      align: 'right',
+      sorter: (a, b) => (a.uvxy_next_ret ?? -Infinity) - (b.uvxy_next_ret ?? -Infinity),
+      render: (x: number | null) => <span className="num">{signedPct(x)}</span>,
+    },
+  ]
+  return (
+    <div className="panel">
+      <Table<HistoryRow>
+        rowKey="date"
+        size="small"
+        columns={columns}
+        dataSource={data}
+        pagination={{ pageSize: 50, showSizeChanger: false, showTotal: (t) => `${t.toLocaleString()} days` }}
+        onRow={(r) => ({ onClick: () => onSelect(r.date), style: { cursor: 'pointer' } })}
+        scroll={{ x: true }}
+      />
+    </div>
+  )
 }
 
-/** Background bands per regime spell. Returned as an array (not a component) because
- *  Recharts 2 only picks up ReferenceArea elements that are direct children of the chart. */
 function bands(spans: Span[]) {
+  // Recharts 2 only picks up ReferenceArea elements that are direct chart children.
   return spans.map((s) => (
     <ReferenceArea
       key={`${s.start}-${s.label}`}
@@ -232,52 +346,113 @@ function bands(spans: Span[]) {
   ))
 }
 
-function oosLine(x: string) {
-  return (
-    <ReferenceLine
-      x={x}
-      stroke="#595959"
-      strokeDasharray="4 4"
-      label={{ value: 'out-of-sample →', position: 'insideTopLeft', fontSize: 11, fill: '#595959' }}
-    />
-  )
-}
+const fmtDate = (d: string) => dayjs(d).format('MMM YY')
 
-interface TooltipProps {
+function ChartTip({
+  active,
+  payload,
+  kind,
+}: {
   active?: boolean
-  payload?: { payload: HistoryRow & Record<string, unknown> }[]
-  labelOf: (r: HistoryRow) => string
+  payload?: { payload: HistoryRow }[]
   kind: 'vix' | 'probs' | 'uvxy'
-}
-
-function RowTooltip({ active, payload, labelOf, kind }: TooltipProps) {
+}) {
   if (!active || !payload?.length) return null
   const r = payload[0].payload
-  const label = labelOf(r)
   return (
-    <div className="rounded border border-gray-200 bg-white px-3 py-2 text-xs shadow">
-      <div className="mb-1 font-semibold">{dayjs(r.date).format('D MMM YYYY')}</div>
-      <div className="flex items-center gap-2">
-        <span
-          style={{ width: 10, height: 10, borderRadius: 2, background: regimeColor(label) }}
-          aria-hidden
-        />
-        {label}
-        {r.in_sample && <span className="text-gray-400">(in-sample)</span>}
+    <div className="rounded-md px-3 py-2 text-xs text-white shadow" style={{ background: 'var(--ink)' }}>
+      <div className="num mb-1">{dayjs(r.date).format('D MMM YYYY')}</div>
+      <div>
+        <span style={{ color: regimeColor(r.smoothed_label) }}>●</span> {r.smoothed_label}
       </div>
-      {kind === 'vix' && (
-        <>
-          <div>VIX {num(r.vix)}</div>
-          <div>Contango {signedPct(r.contango, 2)}</div>
-        </>
-      )}
-      {kind === 'uvxy' && <div>UVXY {r.uvxy_close === null ? '—' : num(r.uvxy_close)}</div>}
+      {kind === 'vix' && <div className="num">VIX {num(r.vix)}</div>}
+      {kind === 'uvxy' && <div className="num">UVXY {price(r.uvxy_close)}</div>}
       {kind === 'probs' &&
-        orderedNames(Object.keys(r.probabilities)).map((n) => (
-          <div key={n}>
+        REGIME_NAMES.map((n) => (
+          <div key={n} className="num">
             {n} {pct(r.probabilities[n])}
           </div>
         ))}
     </div>
+  )
+}
+
+function ChartView({ rows }: { rows: HistoryRow[] }) {
+  const spans = useMemo(() => labelSpans(rows, (r) => r.date, (r) => r.smoothed_label), [rows])
+  const data = useMemo(
+    () =>
+      rows.map((r) => ({
+        ...r,
+        p_calm: r.probabilities.Calm ?? 0,
+        p_stressed: r.probabilities.Stressed ?? 0,
+        p_panic: r.probabilities.Panic ?? 0,
+      })),
+    [rows],
+  )
+  const margin = { top: 8, right: 16, left: 0, bottom: 0 }
+  return (
+    <Space direction="vertical" size="middle" className="w-full">
+      <div className="panel p-4">
+        <div className="eyebrow mb-2">VIX, shaded by regime</div>
+        <ResponsiveContainer width="100%" height={280}>
+          <LineChart data={data} syncId="explorer" margin={margin}>
+            <CartesianGrid stroke={GRID} vertical={false} />
+            <XAxis dataKey="date" tickFormatter={fmtDate} minTickGap={48} tick={AXIS_TICK} />
+            <YAxis tick={AXIS_TICK} width={56} domain={[0, 'auto']} />
+            {bands(spans)}
+            <Tooltip content={<ChartTip kind="vix" />} />
+            <Line dataKey="vix" stroke="#14161b" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="panel p-4">
+        <div className="eyebrow mb-2">Model probabilities (no hindsight)</div>
+        <ResponsiveContainer width="100%" height={180}>
+          <AreaChart data={data} syncId="explorer" margin={margin}>
+            <XAxis dataKey="date" tickFormatter={fmtDate} minTickGap={48} tick={AXIS_TICK} />
+            <YAxis tick={AXIS_TICK} width={56} domain={[0, 1]} tickFormatter={(v: number) => `${Math.round(v * 100)}%`} />
+            <Tooltip content={<ChartTip kind="probs" />} />
+            {REGIME_NAMES.map((n) => (
+              <Area
+                key={n}
+                dataKey={`p_${n.toLowerCase()}`}
+                stackId="p"
+                stroke="none"
+                fill={regimeColor(n)}
+                fillOpacity={0.85}
+                isAnimationActive={false}
+              />
+            ))}
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="panel p-4">
+        <div className="eyebrow mb-2">UVXY price (split-adjusted, log scale), shaded by regime</div>
+        <ResponsiveContainer width="100%" height={280}>
+          <LineChart data={data} syncId="explorer" margin={margin}>
+            <CartesianGrid stroke={GRID} vertical={false} />
+            <XAxis dataKey="date" tickFormatter={fmtDate} minTickGap={48} tick={AXIS_TICK} />
+            <YAxis
+              scale="log"
+              domain={['auto', 'auto']}
+              allowDataOverflow
+              tick={AXIS_TICK}
+              width={56}
+              tickFormatter={(v: number) =>
+                new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(v)
+              }
+            />
+            {bands(spans)}
+            <Tooltip content={<ChartTip kind="uvxy" />} />
+            <Line dataKey="uvxy_close" stroke="#14161b" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+          </LineChart>
+        </ResponsiveContainer>
+        {rows.some((r) => r.uvxy_close === null) && (
+          <Text type="secondary" className="text-xs">
+            UVXY launched on 4 Oct 2011; earlier days have no price.
+          </Text>
+        )}
+      </div>
+    </Space>
   )
 }

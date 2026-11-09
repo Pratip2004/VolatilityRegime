@@ -5,12 +5,12 @@ import type { ReactElement } from 'react'
 import { MemoryRouter } from 'react-router-dom'
 import { vi } from 'vitest'
 
-export function renderWithProviders(ui: ReactElement) {
+export function renderWithProviders(ui: ReactElement, url = '/') {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={qc}>
       <App>
-        <MemoryRouter>{ui}</MemoryRouter>
+        <MemoryRouter initialEntries={[url]}>{ui}</MemoryRouter>
       </App>
     </QueryClientProvider>,
   )

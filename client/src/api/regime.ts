@@ -4,6 +4,7 @@ import type {
   RegimeDiagnostics,
   RegimeHindsight,
   RegimeHistory,
+  RegimeInsights,
   RegimeLatest,
   RegimeVixParams,
   TrainStatus,
@@ -21,6 +22,7 @@ export const regimeKeys = {
   diagnostics: () => [...regimeKeys.all, 'diagnostics'] as const,
   hindsight: (start?: string) => [...regimeKeys.all, 'hindsight', start] as const,
   folds: () => [...regimeKeys.all, 'folds'] as const,
+  insights: () => [...regimeKeys.all, 'insights'] as const,
   vixParams: () => [...regimeKeys.all, 'vix-params'] as const,
 }
 
@@ -105,5 +107,13 @@ export function useTrainRegime() {
   return useMutation({
     mutationFn: () => apiPost<TrainSummary>(`${BASE}/train`),
     onSettled: () => qc.invalidateQueries({ queryKey: regimeKeys.all }),
+  })
+}
+
+export function useRegimeInsights() {
+  return useQuery({
+    queryKey: regimeKeys.insights(),
+    queryFn: () => apiGet<RegimeInsights>(`${BASE}/insights`),
+    retry,
   })
 }

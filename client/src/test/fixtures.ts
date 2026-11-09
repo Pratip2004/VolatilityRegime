@@ -1,4 +1,11 @@
-import type { RegimeDiagnostics, RegimeHistory, RegimeLatest, RiskStats } from '../types/regime'
+import type {
+  RegimeDiagnostics,
+  RegimeHistory,
+  RegimeInsights,
+  RegimeLatest,
+  RegimeProfile,
+  RiskStats,
+} from '../types/regime'
 
 const risk = (scale: number): RiskStats => ({
   count: 500,
@@ -67,6 +74,8 @@ export const history: RegimeHistory = {
     vix: 14 + i,
     contango: 0.05,
     uvxy_close: i === 0 ? null : 1000 + i,
+    days_in_regime: i < 3 ? i + 1 : 1,
+    uvxy_next_ret: i < 3 ? 0.01 * i : null,
   })),
 }
 
@@ -150,4 +159,86 @@ export const diagnostics: RegimeDiagnostics = {
     },
     current_regime: 'Panic',
   },
+}
+
+const profile = (scale: number, median: number): RegimeProfile => ({
+  share_of_days: 0.3,
+  days: 900,
+  spells: 40,
+  spell_median: median,
+  spell_mean: median * 1.5,
+  spell_p75: median * 2,
+  spell_p90: median * 4,
+  spell_max: median * 9,
+  spell_lengths: [1, 2, 5, median, median * 2, median * 4],
+  exit_to: { Calm: 0.44, Stressed: 0.56 },
+  vix_median: 14 * scale,
+  vix_p10: 11 * scale,
+  vix_p90: 21 * scale,
+  contango_median: 0.05,
+  risk: risk(scale),
+})
+
+export const insights: RegimeInsights = {
+  names: ['Calm', 'Stressed', 'Panic'],
+  as_of: '2026-11-06',
+  oos_start: '2014-01-02',
+  profiles: {
+    Calm: { ...profile(1, 14), exit_to: { Stressed: 0.65, Panic: 0.35 } },
+    Stressed: { ...profile(1.3, 12), exit_to: { Calm: 0.63, Panic: 0.37 } },
+    Panic: profile(2, 12),
+  },
+  current: {
+    regime: 'Panic',
+    start: '2026-11-05',
+    end: '2026-11-06',
+    days: 2,
+    ongoing: true,
+    in_sample: false,
+    previous_regime: 'Stressed',
+    next_regime: null,
+    vix_start: 28.2,
+    vix_peak: 28.2,
+    vix_end: 25.6,
+    uvxy_change: 0.42,
+    spx_change: -0.04,
+    longer_than_share: 0,
+    continued_share: 0.92,
+  },
+  episodes: [
+    {
+      regime: 'Panic',
+      start: '2020-02-24',
+      end: '2020-07-28',
+      days: 109,
+      ongoing: false,
+      in_sample: false,
+      previous_regime: 'Stressed',
+      next_regime: 'Stressed',
+      vix_start: 25,
+      vix_peak: 82.69,
+      vix_end: 25,
+      uvxy_change: 1.09,
+      spx_change: -0.05,
+    },
+    {
+      regime: 'Calm',
+      start: '2017-01-03',
+      end: '2017-06-30',
+      days: 124,
+      ongoing: false,
+      in_sample: false,
+      previous_regime: 'Stressed',
+      next_regime: 'Stressed',
+      vix_start: 12,
+      vix_peak: 14,
+      vix_end: 11,
+      uvxy_change: -0.6,
+      spx_change: 0.08,
+    },
+  ],
+  yearly: [
+    { year: 2013, days: 252, in_sample: true, shares: { Calm: 0.5, Stressed: 0.3, Panic: 0.2 } },
+    { year: 2020, days: 253, in_sample: false, shares: { Calm: 0.2, Stressed: 0.2, Panic: 0.6 } },
+  ],
 }

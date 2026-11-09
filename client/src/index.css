@@ -2,10 +2,67 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Design tokens: a cool instrument-panel neutral, indigo for controls only, so the three
+   regime colours are the only saturated colours carrying meaning. */
+:root {
+  --ink: #14161b;
+  --ink-2: #4b5160;
+  --ink-3: #7a8191;
+  --paper: #f4f5f7;
+  --panel: #ffffff;
+  --rule: #e3e6eb;
+  --accent: #3b3aa8;
+  --calm: #22c55e;
+  --stressed: #f59e0b;
+  --panic: #ef4444;
+  --font-display: 'IBM Plex Sans Condensed', 'Arial Narrow', system-ui, sans-serif;
+  --font-body: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+}
+
 html,
 body,
 #root {
   margin: 0;
   min-height: 100%;
-  background: #f5f6f8;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+}
+
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+/* Numbers line up in columns everywhere (tabular figures of the body face). */
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+.eyebrow {
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+}
+
+.cell-focus:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
 }
