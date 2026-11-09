@@ -259,4 +259,21 @@ def vix_params(settings: SettingsDep) -> dict:
         live = service.load_frame("live", settings)
     except service.NotTrainedError as exc:
         raise _not_trained(exc) from exc
-    return params | {"current_regime": str(live["smoothed_label"].iloc[-1])}
+    current = str(live["smoothed_label"].iloc[-1])
+    return params | {
+        "current_regime": current,
+        "as_of": _iso(live.index[-1]),
+        "simulator": simulator_overrides(params["by_regime"].get(current, {})),
+    }
+
+
+SIMULATOR_FIELDS = ("kappa", "theta", "sigma", "lam", "mu_j", "sigma_j")
+
+
+def simulator_overrides(p: dict) -> dict | None:
+    """One-factor overrides for the simulator, or None if the regime fit is incomplete (e.g. no
+    mean reversion within the regime's days)."""
+    vals = {k: p.get(k) for k in SIMULATOR_FIELDS}
+    if any(v is None for v in vals.values()):
+        return None
+    return {"model": "one_factor", "overrides": {k: float(v) for k, v in vals.items()}}

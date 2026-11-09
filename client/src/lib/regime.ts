@@ -125,3 +125,16 @@ export function verdict(rows: ComparisonRow[]) {
   const decided = hmm + base
   return { hmm, base, clearlyBetter: decided > 0 && hmm / decided >= 0.75 }
 }
+
+/** Regime names present in a probability map, in canonical order (Calm → Panic) first. */
+export function orderedNames(keys: Iterable<string>): string[] {
+  const ks = [...keys]
+  const known = REGIME_NAMES.filter((n) => ks.includes(n))
+  return [...known, ...ks.filter((k) => !known.includes(k as RegimeName))]
+}
+
+/** Most severe regime present (Panic if available, else the last in canonical order). */
+export function mostSevere(keys: Iterable<string>): string | undefined {
+  const names = orderedNames(keys)
+  return names.includes('Panic') ? 'Panic' : names[names.length - 1]
+}

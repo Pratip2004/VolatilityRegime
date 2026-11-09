@@ -4,6 +4,8 @@ import {
   fmtCheck,
   formatFeature,
   labelSpans,
+  mostSevere,
+  orderedNames,
   niceTicks,
   pct,
   regimeColor,
@@ -68,5 +70,12 @@ describe('regime helpers', () => {
     expect(verdict([row('hmm'), row('hmm'), row('hmm'), row('baseline'), row('tie')]).clearlyBetter).toBe(true)
     expect(verdict([row('hmm'), row('hmm'), row('baseline'), row('baseline')]).clearlyBetter).toBe(false)
     expect(verdict([row('tie')]).clearlyBetter).toBe(false)
+  })
+
+  it('orders regime names canonically and finds the most severe', () => {
+    expect(orderedNames(['Panic', 'Calm', 'Stressed'])).toEqual(['Calm', 'Stressed', 'Panic'])
+    expect(orderedNames(['Elevated', 'Panic', 'Calm'])).toEqual(['Calm', 'Panic', 'Elevated'])
+    expect(mostSevere(['Calm', 'Panic'])).toBe('Panic')
+    expect(mostSevere(['Calm', 'Stressed'])).toBe('Stressed')
   })
 })

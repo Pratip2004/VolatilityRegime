@@ -191,9 +191,21 @@ class VixParams(_Model):
     kappa: float | None = None
     theta: float | None = None
     sigma: float | None = None
+    lam: float | None = None
+    mu_j: float | None = None
+    sigma_j: float | None = None
+    jumps: int | None = None
     half_life_days: float | None = None
     mean_daily_log_change: float | None = None
     std_daily_log_change: float | None = None
+
+
+class SimulatorOverrides(_Model):
+    """Drop-in request fields for the Monte Carlo simulator's ``POST /api/simulate``
+    (``model: "one_factor"`` + ``overrides``) for today's regime."""
+
+    model: str = "one_factor"
+    overrides: dict[str, float]
 
 
 class RegimeVixParams(_Model):
@@ -202,6 +214,8 @@ class RegimeVixParams(_Model):
     all_days: VixParams
     by_regime: dict[str, VixParams]
     current_regime: str | None = None
+    as_of: str | None = None
+    simulator: SimulatorOverrides | None = None
 
 
 class RegimeDiagnostics(_Model):

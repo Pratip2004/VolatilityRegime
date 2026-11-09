@@ -1,6 +1,7 @@
 import { ReloadOutlined } from '@ant-design/icons'
 import {
   Alert,
+  App,
   Button,
   Card,
   Col,
@@ -12,7 +13,6 @@ import {
   Table,
   Tag,
   Typography,
-  message,
 } from 'antd'
 import type { TableColumnsType } from 'antd'
 import dayjs from 'dayjs'
@@ -22,7 +22,7 @@ import { PageState } from '../components/PageState'
 import { PageHeader, RegimeTag, Sparkline } from '../components/RegimeBits'
 import {
   FEATURE_LABELS,
-  REGIME_NAMES,
+  orderedNames,
   SIZE_NOT_DIRECTION,
   featureDisplayValue,
   formatFeature,
@@ -56,6 +56,7 @@ export default function RegimeTodayPage() {
 
 function TodayContent({ data }: { data: RegimeLatest }) {
   const byName = Object.fromEntries(data.features.map((f) => [f.name, f]))
+  const names = orderedNames(Object.keys(data.probabilities))
   return (
     <Space direction="vertical" size="large" className="w-full">
       {data.changed_today && (
@@ -84,7 +85,7 @@ function TodayContent({ data }: { data: RegimeLatest }) {
           </Col>
           <Col xs={24} md={14}>
             <Text type="secondary">Filtered probabilities (uses data up to today only)</Text>
-            {REGIME_NAMES.map((n) => (
+            {names.map((n) => (
               <div key={n} className="mt-1 flex items-center gap-3">
                 <span className="w-20 text-right">
                   <Text>{n}</Text>
@@ -173,7 +174,7 @@ function NextDayRiskCard({ data }: { data: RegimeLatest }) {
         </Col>
         <Col span={8}>
           <Statistic
-            title="Bad case (99th pct)"
+            title="Tail move (99th pct)"
             value={signedPct(r.p99)}
             valueStyle={{ fontSize: 18 }}
           />
@@ -203,13 +204,14 @@ function NextDayRiskCard({ data }: { data: RegimeLatest }) {
 }
 
 function ForecastCard({ data }: { data: RegimeLatest }) {
+  const names = orderedNames(Object.keys(data.probabilities))
   const columns: TableColumnsType<ForecastRow> = [
     {
       title: 'Horizon',
       dataIndex: 'horizon',
       render: (h: number) => `${h} trading day${h === 1 ? '' : 's'}`,
     },
-    ...REGIME_NAMES.map((n) => ({
+    ...names.map((n) => ({
       title: <RegimeTag name={n} />,
       key: n,
       align: 'right' as const,
@@ -243,17 +245,18 @@ function ForecastCard({ data }: { data: RegimeLatest }) {
 function RetrainControl() {
   const status = useRegimeStatus()
   const train = useTrainRegime()
+  const { message } = App.useApp()
   const [elapsed, setElapsed] = useState(0)
+  const running = train.isPending || Boolean(status.data?.training)
 
   useEffect(() => {
-    if (!train.isPending) return
+    if (!running) return
     setElapsed(0)
     const id = window.setInterval(() => setElapsed((e) => e + 1), 1000)
     return () => window.clearInterval(id)
-  }, [train.isPending])
+  }, [running])
 
   const expected = status.data?.runtime_s ?? 120
-  const running = train.isPending || Boolean(status.data?.training)
 
   const onClick = () =>
     train.mutate(undefined, {
@@ -272,7 +275,7 @@ function RetrainControl() {
       >
         Retrain model
       </Button>
-      {train.isPending ? (
+      {running ? (
         <div style={{ width: 220 }}>
           <Progress
             percent={Math.min(99, Math.round((elapsed / expected) * 100))}
@@ -280,7 +283,8 @@ function RetrainControl() {
             status="active"
           />
           <Text type="secondary" className="text-xs">
-            Walk-forward + live fit · {elapsed}s (usually ~{Math.round(expected)}s)
+            {train.isPending ? 'Walk-forward + live fit' : 'Training in progress elsewhere'} ·{' '}
+            {elapsed}s (usually ~{Math.round(expected)}s)
           </Text>
         </div>
       ) : (

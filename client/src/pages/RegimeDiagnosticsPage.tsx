@@ -34,6 +34,7 @@ import {
   FEATURE_LABELS,
   fmtCheck,
   formatFeature,
+  mostSevere,
   num,
   pct,
   regimeColor,
@@ -169,6 +170,10 @@ function betterTag(b: ComparisonRow['better']) {
   return <Text type="secondary">—</Text>
 }
 
+function isSpikeStats(x: unknown): x is SpikeStats {
+  return typeof x === 'object' && x !== null && 'spike_days' in x
+}
+
 function ComparisonCard({
   rows,
   spikes,
@@ -179,8 +184,10 @@ function ComparisonCard({
   stability: Record<string, number>
 }) {
   const { hmm: hmmWins, base: baseWins, clearlyBetter } = verdict(rows)
-  const hmm = spikes.hmm as SpikeStats
-  const base = spikes.baseline as SpikeStats
+  const hmm = isSpikeStats(spikes.hmm) ? spikes.hmm : null
+  const base = isSpikeStats(spikes.baseline) ? spikes.baseline : null
+  const threshold = typeof spikes.threshold === 'number' ? spikes.threshold : null
+  const window = typeof spikes.window === 'number' ? spikes.window : null
   const columns: TableColumnsType<ComparisonRow> = [
     { title: 'Check', dataIndex: 'check' },
     { title: 'HMM', dataIndex: 'hmm', align: 'right', render: (x, r) => fmtCheck(r.check, x) },
@@ -214,10 +221,16 @@ function ComparisonCard({
       <Paragraph type="secondary" className="mt-3 text-xs" style={{ marginBottom: 0 }}>
         Differences within 10% count as ties. “Neither” = both models miss the spec's expected
         sign. A higher spike hit rate partly reflects how often a model flags Stressed/Panic —
-        read it together with the false-alarm rate. Spike = VIX rises ≥30% within the next 5 trading days ({hmm.spike_events} events,{' '}
-        {hmm.spike_days} days). Median days flagged before an event: HMM{' '}
-        {num(hmm.median_days_flagged_before_event, 1)}, baseline{' '}
-        {num(base.median_days_flagged_before_event, 1)}. Raw HMM flips/year{' '}
+        read it together with the false-alarm rate.{' '}
+        {hmm && base && (
+          <>
+            Spike = VIX rises ≥{pct(threshold, 0)} within the next {window ?? '—'} trading days (
+            {hmm.spike_events} events, {hmm.spike_days} days). Median days flagged before an
+            event: HMM {num(hmm.median_days_flagged_before_event, 1)}, baseline{' '}
+            {num(base.median_days_flagged_before_event, 1)}.{' '}
+          </>
+        )}
+        Raw HMM flips/year{' '}
         {num(stability.hmm_raw_flips_per_year, 1)} vs smoothed{' '}
         {num(stability.hmm_smoothed_flips_per_year, 1)}.
       </Paragraph>
@@ -427,10 +440,14 @@ function VixParamsCard({ d }: { d: RegimeDiagnostics }) {
           { title: 'κ (per yr)', dataIndex: 'kappa', align: 'right', render: (x) => num(x, 1) },
           { title: 'θ (VIX)', dataIndex: 'theta', align: 'right', render: (x) => num(x, 1) },
           { title: 'σ (ann.)', dataIndex: 'sigma', align: 'right', render: (x) => num(x, 2) },
+          { title: 'λ jumps/yr', dataIndex: 'lam', align: 'right', render: (x) => num(x, 1) },
+          { title: 'μ_J', dataIndex: 'mu_j', align: 'right', render: (x) => num(x, 3) },
         ]}
       />
       <Text type="secondary" className="text-xs">
-        {vp.model}. Fitted on {vp.source}.
+        {vp.model}. Fitted on {vp.source} with the simulator's own method (AR(1) + 3σ up-jump
+        detection); the Monte Carlo simulator can start from today's row via its “Use today's
+        regime” switch.
       </Text>
     </Card>
   )
@@ -474,14 +491,15 @@ function HindsightPanel() {
   const [open, setOpen] = useState(false)
   const start = useMemo(() => dayjs().subtract(3, 'year').format('YYYY-MM-DD'), [])
   const q = useRegimeHindsight(start, open)
+  const severe = mostSevere(Object.keys(q.data?.rows[0]?.filtered ?? { Panic: 0 })) ?? 'Panic'
   const data = useMemo(
     () =>
       (q.data?.rows ?? []).map((r) => ({
         date: r.date,
-        filtered: r.filtered.Panic ?? 0,
-        smoothed: r.smoothed.Panic ?? 0,
+        filtered: r.filtered[severe] ?? 0,
+        smoothed: r.smoothed[severe] ?? 0,
       })),
-    [q.data],
+    [q.data, severe],
   )
   return (
     <Collapse
@@ -506,8 +524,13 @@ function HindsightPanel() {
                   'Smoothed probabilities use data after each date. Not usable for trading or as a daily signal.'
                 }
               />
-              <PageState isLoading={q.isLoading} error={q.error} isEmpty={open && !q.isLoading && data.length === 0}>
-                <Text type="secondary">P(Panic), last 3 years: filtered (real-time) vs smoothed (hindsight).</Text>
+              <PageState
+                isLoading={q.isLoading}
+                error={q.error}
+                onRetry={() => q.refetch()}
+                isEmpty={open && !q.isLoading && data.length === 0}
+              >
+                <Text type="secondary">P({severe}), last 3 years: filtered (real-time) vs smoothed (hindsight).</Text>
                 <ResponsiveContainer width="100%" height={240}>
                   <LineChart data={data} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
                     <CartesianGrid stroke="#f0f0f0" vertical={false} />
@@ -527,15 +550,15 @@ function HindsightPanel() {
                     <Legend />
                     <Line
                       dataKey="filtered"
-                      name="Filtered P(Panic) — real-time"
-                      stroke={regimeColor('Panic')}
+                      name={`Filtered P(${severe}) — real-time`}
+                      stroke={regimeColor(severe)}
                       strokeWidth={2}
                       dot={false}
                       isAnimationActive={false}
                     />
                     <Line
                       dataKey="smoothed"
-                      name="Smoothed P(Panic) — hindsight"
+                      name={`Smoothed P(${severe}) — hindsight`}
                       stroke="#6b7280"
                       strokeWidth={2}
                       strokeDasharray="5 4"

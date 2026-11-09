@@ -172,6 +172,10 @@ export interface VixParams {
   kappa: number | null
   theta: number | null
   sigma: number | null
+  lam?: number | null
+  mu_j?: number | null
+  sigma_j?: number | null
+  jumps?: number | null
   half_life_days: number | null
   mean_daily_log_change: number | null
   std_daily_log_change: number | null
@@ -183,6 +187,9 @@ export interface RegimeVixParams {
   all_days: VixParams
   by_regime: Record<string, VixParams>
   current_regime: string | null
+  as_of?: string | null
+  /** Drop-in fields for the Monte Carlo simulator's POST /api/simulate. */
+  simulator?: { model: string; overrides: Record<string, number> } | null
 }
 
 export interface RegimeDiagnostics {

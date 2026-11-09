@@ -9,6 +9,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from app.core.config import JumpConfig
 from app.montecarlo.calibration import calibrate_by_regime
 
 PERCENTILES = (1, 5, 25, 75, 95, 99)
@@ -70,6 +71,8 @@ def empirical_transition_matrix(
     return ct.div(ct.sum(axis=1).replace(0, np.nan), axis=0).fillna(0.0)
 
 
-def regime_vix_params(vix: pd.Series, labels: pd.Series) -> dict[str, dict]:
+def regime_vix_params(
+    vix: pd.Series, labels: pd.Series, jump: JumpConfig | None = None
+) -> dict[str, dict]:
     """Per-regime spot-VIX process parameters for starting the Monte Carlo simulator."""
-    return calibrate_by_regime(vix, labels)
+    return calibrate_by_regime(vix, labels, jump)

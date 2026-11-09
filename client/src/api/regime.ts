@@ -36,9 +36,23 @@ export function useRegimeLatest() {
 }
 
 export function useRegimeStatus() {
+  const qc = useQueryClient()
   return useQuery({
     queryKey: regimeKeys.status(),
-    queryFn: () => apiGet<TrainStatus>(`${BASE}/status`),
+    queryFn: async () => {
+      const prev = qc.getQueryData<TrainStatus>(regimeKeys.status())
+      const next = await apiGet<TrainStatus>(`${BASE}/status`)
+      // A run started elsewhere (CLI, another tab) just finished: refresh everything.
+      if (prev?.training && !next.training) {
+        void qc.invalidateQueries({
+          queryKey: regimeKeys.all,
+          predicate: (q) => q.queryKey[1] !== 'status',
+        })
+      }
+      return next
+    },
+    // Poll while a training run is in progress anywhere.
+    refetchInterval: (q) => (q.state.data?.training ? 5000 : false),
     retry,
   })
 }

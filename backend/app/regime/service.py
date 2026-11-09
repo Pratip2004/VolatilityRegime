@@ -31,6 +31,7 @@ from pathlib import Path
 
 import joblib
 import pandas as pd
+from threadpoolctl import threadpool_limits
 
 from app.core.config import Settings, get_settings
 from app.data.build_dataset import load_panel
@@ -90,11 +91,14 @@ def is_training() -> bool:
     return _train_lock.locked()
 
 
-def train(settings: Settings | None = None, n_jobs: int = -1, blocking: bool = True) -> dict:
+def train(
+    settings: Settings | None = None, n_jobs: int | None = None, blocking: bool = True
+) -> dict:
     """Full retrain. With ``blocking=False`` raises ``TrainingInProgressError`` instead of
     waiting for a run already in progress (in this or another process)."""
     settings = settings or get_settings()
-    with _training_lock(settings, blocking):
+    n_jobs = settings.train_n_jobs if n_jobs is None else n_jobs
+    with _training_lock(settings, blocking), threadpool_limits(settings.train_blas_threads):
         return _train(settings, n_jobs)
 
 
@@ -119,7 +123,9 @@ def _train_into(settings: Settings, out: Path, t0: float, n_jobs: int) -> dict:
 
     panel = load_panel().set_index("date").sort_index()
     feats = build_features(panel.reset_index(), cfg)
-    hist, fold_meta, models = run_walk_forward(feats, cfg, out_dir=out, n_jobs=n_jobs)
+    hist, fold_meta, models = run_walk_forward(
+        feats, cfg, out_dir=out, n_jobs=n_jobs, blas_threads=settings.train_blas_threads
+    )
     names = list(next(iter(models.values())).names)
 
     # Live model on all data.
@@ -158,10 +164,11 @@ def _train_into(settings: Settings, out: Path, t0: float, n_jobs: int) -> dict:
     write_json(out / "risk_stats.json", risk)
 
     vix_params = {
-        "model": "log-OU: d ln VIX = kappa (ln theta - ln VIX) dt + sigma dW, dt = 1/252",
+        "model": "one_factor: x[t+1] = ln theta + b (x[t] - ln theta) + sigma sqrt(dt) Z + J N, "
+        "b = exp(-kappa dt), N ~ Bernoulli(lam dt), J ~ N(mu_j, sigma_j), x = ln VIX, dt = 1/252",
         "source": "out-of-sample smoothed HMM labels",
-        "all_days": calibrate_spot_vix(oos["vix"]),
-        "by_regime": regime_vix_params(vix, oos["smoothed_label"]),
+        "all_days": calibrate_spot_vix(oos["vix"], cfg.jump),
+        "by_regime": regime_vix_params(vix, oos["smoothed_label"], cfg.jump),
     }
     write_json(out / "vix_params.json", vix_params)
 

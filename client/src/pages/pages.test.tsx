@@ -123,3 +123,45 @@ describe('RegimeDiagnosticsPage', () => {
     expect(await screen.findByTestId('page-not-trained')).toBeInTheDocument()
   })
 })
+
+describe('R5 review regressions', () => {
+  it('shows an empty UVXY panel for ranges before UVXY existed', async () => {
+    const rows = history.rows.map((r) => ({ ...r, uvxy_close: null }))
+    mockFetch({ '/api/regime/history': { body: { ...history, rows } } })
+    renderWithProviders(<RegimeHistoryPage />)
+    expect(await screen.findByText(/No UVXY prices in this range/)).toBeInTheDocument()
+  })
+
+  it('renders two-state models without assuming Stressed', async () => {
+    const two = {
+      ...latest,
+      smoothed_label: 'Calm' as const,
+      raw_label: 'Calm' as const,
+      changed_today: false,
+      probabilities: { Calm: 0.8, Panic: 0.2 },
+      forecast: [{ horizon: 1, probabilities: { Calm: 0.8, Panic: 0.2 } }],
+    }
+    mockFetch({ '/api/regime/latest': { body: two }, '/api/regime/status': { body: status } })
+    renderWithProviders(<RegimeTodayPage />)
+    await screen.findByTestId('size-not-direction')
+    expect(screen.queryByLabelText('Stressed probability')).toBeNull()
+    expect(screen.getByLabelText('Panic probability')).toBeInTheDocument()
+  })
+
+  it('shows progress when training runs elsewhere', async () => {
+    mockFetch({
+      '/api/regime/latest': { body: latest },
+      '/api/regime/status': { body: { ...status, training: true } },
+    })
+    renderWithProviders(<RegimeTodayPage />)
+    expect(await screen.findByText(/Training in progress elsewhere/)).toBeInTheDocument()
+  })
+
+  it('does not call the 99th percentile a "bad case"', async () => {
+    mockFetch({ '/api/regime/latest': { body: latest }, '/api/regime/status': { body: status } })
+    const { container } = renderWithProviders(<RegimeTodayPage />)
+    await screen.findByTestId('size-not-direction')
+    expect(container.textContent).not.toMatch(/bad case/i)
+    expect(container.textContent).toContain('Tail move (99th pct)')
+  })
+})

@@ -146,6 +146,20 @@ def test_folds_and_hindsight_and_vix_params(client, trained) -> None:
     assert h["rows"][0]["date"] >= "2011-01-01"
     v = client.get("/api/regime/vix-params").json()
     assert v["current_regime"] in ("Calm", "Stressed", "Panic")
+    assert v["as_of"] == trained["data_end"]
+    sim = v["simulator"]
+    if sim is not None:
+        assert sim["model"] == "one_factor"
+        assert set(sim["overrides"]) == {"kappa", "theta", "sigma", "lam", "mu_j", "sigma_j"}
+        assert sim["overrides"]["kappa"] == v["by_regime"][v["current_regime"]]["kappa"]
+
+
+def test_simulator_overrides_need_complete_fit() -> None:
+    from app.api.routes.regime import simulator_overrides
+
+    full = {"kappa": 5, "theta": 18, "sigma": 1, "lam": 4, "mu_j": 0.2, "sigma_j": 0.05}
+    assert simulator_overrides(full)["overrides"]["theta"] == 18.0
+    assert simulator_overrides(full | {"kappa": None}) is None
 
 
 def test_train_conflict_returns_409(client, settings, trained) -> None:

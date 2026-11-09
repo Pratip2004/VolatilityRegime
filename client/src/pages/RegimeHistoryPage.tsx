@@ -1,4 +1,4 @@
-import { Alert, Card, DatePicker, Segmented, Space, Typography } from 'antd'
+import { Alert, Card, DatePicker, Empty, Segmented, Space, Typography } from 'antd'
 import type { TimeRangePickerProps } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useMemo, useState } from 'react'
@@ -20,7 +20,7 @@ import { PageState } from '../components/PageState'
 import { PageHeader, RegimeLegend } from '../components/RegimeBits'
 import {
   REGIME_BAND_FILL_OPACITY,
-  REGIME_NAMES,
+  orderedNames,
   labelSpans,
   num,
   pct,
@@ -35,12 +35,15 @@ const { Text } = Typography
 
 type LabelSource = 'hmm' | 'baseline'
 
-const presets: TimeRangePickerProps['presets'] = [
-  { label: '1Y', value: [dayjs().subtract(1, 'year'), dayjs()] },
-  { label: '3Y', value: [dayjs().subtract(3, 'year'), dayjs()] },
-  { label: '5Y', value: [dayjs().subtract(5, 'year'), dayjs()] },
-  { label: 'All', value: [dayjs('2008-01-01'), dayjs()] },
-]
+function makePresets(): TimeRangePickerProps['presets'] {
+  const now = dayjs()
+  return [
+    { label: '1Y', value: [now.subtract(1, 'year'), now] },
+    { label: '3Y', value: [now.subtract(3, 'year'), now] },
+    { label: '5Y', value: [now.subtract(5, 'year'), now] },
+    { label: 'All', value: [dayjs('2008-01-01'), now] },
+  ]
+}
 
 const fmtDate = (d: string) => dayjs(d).format('MMM YY')
 const GRID = '#f0f0f0'
@@ -59,16 +62,19 @@ export default function RegimeHistoryPage() {
     () => labelSpans(rows, (r) => r.date, source === 'hmm' ? (r) => r.smoothed_label : (r) => r.baseline_label),
     [rows, source],
   )
+  const names = useMemo(() => orderedNames(q.data?.names ?? []), [q.data])
   const chartRows = useMemo(
     () =>
       rows.map((r) => ({
         ...r,
-        p_calm: r.probabilities.Calm ?? 0,
-        p_stressed: r.probabilities.Stressed ?? 0,
-        p_panic: r.probabilities.Panic ?? 0,
+        ...Object.fromEntries(names.map((n) => [probKey(n), r.probabilities[n] ?? 0])),
       })),
-    [rows],
+    [rows, names],
   )
+  const uvxyDomain = useMemo(() => {
+    const v = rows.map((r) => r.uvxy_close).filter((x): x is number => x !== null && x > 0)
+    return v.length ? [Math.min(...v) * 0.9, Math.max(...v) * 1.1] : null
+  }, [rows])
   const oosStart = rows.find((r) => !r.in_sample)?.date
   const hasInSample = rows.some((r) => r.in_sample)
 
@@ -79,7 +85,7 @@ export default function RegimeHistoryPage() {
         <Space wrap size="large">
           <RangePicker
             value={range}
-            presets={presets}
+            presets={makePresets()}
             allowClear={false}
             onChange={(v) => v && v[0] && v[1] && setRange([v[0], v[1]])}
             disabledDate={(d) => d.isAfter(dayjs()) || d.isBefore(dayjs('2008-01-01'))}
@@ -141,13 +147,14 @@ export default function RegimeHistoryPage() {
                   tick={AXIS_TICK}
                   width={64}
                   domain={[0, 1]}
+                  ticks={[0, 0.25, 0.5, 0.75, 1]}
                   tickFormatter={(v: number) => `${Math.round(v * 100)}%`}
                 />
                 <Tooltip content={<RowTooltip labelOf={labelOf} kind="probs" />} />
-                {REGIME_NAMES.map((n) => (
+                {names.map((n) => (
                   <Area
                     key={n}
-                    dataKey={`p_${n.toLowerCase()}`}
+                    dataKey={probKey(n)}
                     name={n}
                     stackId="p"
                     stroke={regimeColor(n)}
@@ -162,14 +169,16 @@ export default function RegimeHistoryPage() {
           </Card>
 
           <Card title="UVXY (split-adjusted, log scale) with regime bands" size="small">
+            {uvxyDomain === null ? (
+              <Empty description="No UVXY prices in this range (UVXY launched on 2011-10-04)." />
+            ) : (
             <ResponsiveContainer width="100%" height={300}>
               <LineChart data={chartRows} syncId="regime" margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
                 <CartesianGrid stroke={GRID} vertical={false} />
                 <XAxis dataKey="date" tickFormatter={fmtDate} minTickGap={40} tick={AXIS_TICK} />
                 <YAxis
                   scale="log"
-                  domain={['auto', 'auto']}
-                  allowDataOverflow
+                  domain={uvxyDomain}
                   tick={AXIS_TICK}
                   width={64}
                   tickFormatter={(v: number) => compact(v)}
@@ -186,7 +195,8 @@ export default function RegimeHistoryPage() {
                 />
               </LineChart>
             </ResponsiveContainer>
-            {rows.some((r) => r.uvxy_close === null) && (
+            )}
+            {uvxyDomain !== null && rows.some((r) => r.uvxy_close === null) && (
               <Text type="secondary" className="text-xs">
                 UVXY launched on 2011-10-04; earlier dates have no UVXY price.
               </Text>
@@ -196,6 +206,10 @@ export default function RegimeHistoryPage() {
       </PageState>
     </div>
   )
+}
+
+function probKey(name: string) {
+  return `p_${name.toLowerCase()}`
 }
 
 function compact(v: number) {
@@ -259,7 +273,7 @@ function RowTooltip({ active, payload, labelOf, kind }: TooltipProps) {
       )}
       {kind === 'uvxy' && <div>UVXY {r.uvxy_close === null ? '—' : num(r.uvxy_close)}</div>}
       {kind === 'probs' &&
-        REGIME_NAMES.map((n) => (
+        orderedNames(Object.keys(r.probabilities)).map((n) => (
           <div key={n}>
             {n} {pct(r.probabilities[n])}
           </div>
