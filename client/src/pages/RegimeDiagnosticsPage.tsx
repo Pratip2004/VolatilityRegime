@@ -446,8 +446,8 @@ function VixParamsCard({ d }: { d: RegimeDiagnostics }) {
       />
       <Text type="secondary" className="text-xs">
         {vp.model}. Fitted on {vp.source} with the simulator's own method (AR(1) + 3σ up-jump
-        detection); the Monte Carlo simulator can start from today's row via its “Use today's
-        regime” switch.
+        detection). Available as drop-in simulator parameters from{' '}
+        <Text code>GET /api/regime/vix-params</Text>.
       </Text>
     </Card>
   )

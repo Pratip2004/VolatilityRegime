@@ -92,13 +92,7 @@ class Settings(BaseSettings):
     train_n_jobs: int = Field(default=4, ge=1, le=32)
     train_blas_threads: int = Field(default=1, ge=1, le=16)
     cors_origins: list[str] = Field(
-        # 5174: this client; 5173: the Monte Carlo simulator's client ("Use today's regime").
-        default_factory=lambda: [
-            "http://localhost:5174",
-            "http://127.0.0.1:5174",
-            "http://localhost:5173",
-            "http://127.0.0.1:5173",
-        ]
+        default_factory=lambda: ["http://localhost:5174", "http://127.0.0.1:5174"]
     )
     regime: RegimeConfig = Field(default_factory=RegimeConfig)
 

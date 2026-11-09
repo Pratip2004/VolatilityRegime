@@ -139,9 +139,8 @@ regime:
                              "lam": 3.79, "mu_j": 0.398, "sigma_j": 0.118}}}
 ```
 
-Send it as `model` + `overrides` to the simulator's `POST /api/simulate`. The simulator's client
-can reach this API through a dev-server proxy; CORS also allows `http://localhost:5173` for direct
-calls.
+Send it as `model` + `overrides` to the simulator's `POST /api/simulate`. This is optional: the
+regime detector runs on its own and does not need the simulator.
 
 ## Limitations
 
