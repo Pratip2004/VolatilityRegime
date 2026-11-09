@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import threading
+from datetime import date
 from typing import Annotated
 
 import numpy as np
 import pandas as pd
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.schemas.regime import (
     FoldInfo,
@@ -26,7 +26,6 @@ from app.regime.hmm_model import prob_column
 router = APIRouter(prefix="/api/regime", tags=["regime"])
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 SPARKLINE_DAYS = 60
-_training = threading.Event()
 
 
 def _not_trained(exc: Exception) -> HTTPException:
@@ -43,27 +42,26 @@ def _f(x) -> float | None:
 
 @router.post("/train", response_model=TrainSummary)
 def train(settings: SettingsDep) -> dict:
-    """Run walk-forward + live fit. Blocks until done (about 2 minutes on the full history)."""
-    if _training.is_set():
-        raise HTTPException(status_code=409, detail="training already running")
-    _training.set()
+    """Run walk-forward + live fit. Blocks until done (about 2 minutes on the full history).
+    Returns 409 if a run is already in progress (in this or another process)."""
     try:
-        return service.train(settings)
+        return service.train(settings, blocking=False)
+    except service.TrainingInProgressError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    finally:
-        _training.clear()
 
 
 @router.get("/status", response_model=TrainStatus)
 def status(settings: SettingsDep) -> dict:
+    training = service.is_training()
     try:
         s = service.load_json("train_summary", settings)
     except service.NotTrainedError:
-        return {"trained": False, "training": _training.is_set()}
+        return {"trained": False, "training": training}
     return {
         "trained": True,
-        "training": _training.is_set(),
+        "training": training,
         "trained_at": s["trained_at"],
         "data_end": s["data_end"],
         "runtime_s": s["runtime_s"],
@@ -136,8 +134,8 @@ def latest(settings: SettingsDep) -> dict:
 @router.get("/history", response_model=RegimeHistory)
 def history(
     settings: SettingsDep,
-    start: Annotated[str | None, Query(pattern=r"^\d{4}-\d{2}-\d{2}$")] = None,
-    end: Annotated[str | None, Query(pattern=r"^\d{4}-\d{2}-\d{2}$")] = None,
+    start: date | None = None,
+    end: date | None = None,
 ) -> dict:
     try:
         hist = service.load_frame("history", settings)
@@ -149,27 +147,42 @@ def history(
         hist = hist[hist.index >= pd.Timestamp(start)]
     if end:
         hist = hist[hist.index <= pd.Timestamp(end)]
-    cols = [
-        "p_calm",
-        "p_stressed",
-        "p_panic",
-        "raw_label",
-        "smoothed_label",
-        "baseline_label",
-        "in_sample",
-        "fold_id",
-        "vix",
-        "contango",
-        "uvxy_close",
+    pcols = [c for c in hist.columns if c.startswith("p_")]
+    names = [c[2:].capitalize() for c in pcols]
+    probs = hist[pcols].to_numpy(dtype=float)
+    uvxy = hist["uvxy_close"].to_numpy(dtype=float)
+    rows = [
+        {
+            "date": _iso(d),
+            "probabilities": dict(zip(names, map(float, p), strict=True)),
+            "raw_label": raw,
+            "smoothed_label": sm,
+            "baseline_label": base,
+            "in_sample": bool(ins),
+            "fold_id": fid,
+            "vix": float(vix),
+            "contango": float(cont),
+            "uvxy_close": float(u) if np.isfinite(u) else None,
+        }
+        for d, p, raw, sm, base, ins, fid, vix, cont, u in zip(
+            hist.index,
+            probs,
+            hist["raw_label"],
+            hist["smoothed_label"],
+            hist["baseline_label"],
+            hist["in_sample"],
+            hist["fold_id"],
+            hist["vix"],
+            hist["contango"],
+            uvxy,
+            strict=True,
+        )
     ]
-    df = hist[cols].copy()
-    df["uvxy_close"] = df["uvxy_close"].astype(object).where(df["uvxy_close"].notna(), None)
-    df.insert(0, "date", [_iso(d) for d in df.index])
     return {
-        "start": start,
-        "end": end,
-        "names": ["Calm", "Stressed", "Panic"],
-        "rows": df.to_dict(orient="records"),
+        "start": start.isoformat() if start else None,
+        "end": end.isoformat() if end else None,
+        "names": names,
+        "rows": rows,
     }
 
 
@@ -201,10 +214,7 @@ def diagnostics(settings: SettingsDep) -> dict:
 
 
 @router.get("/hindsight", response_model=RegimeHindsight)
-def hindsight(
-    settings: SettingsDep,
-    start: Annotated[str | None, Query(pattern=r"^\d{4}-\d{2}-\d{2}$")] = None,
-) -> dict:
+def hindsight(settings: SettingsDep, start: date | None = None) -> dict:
     """Live-model filtered vs smoothed (forward-backward) probabilities. Smoothed values use
     future data and are for diagnostics only."""
     try:

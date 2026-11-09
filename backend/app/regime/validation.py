@@ -157,7 +157,8 @@ def run_validation(
             **{k: spike_lead_time(v, spikes) for k, v in oos_sources.items()},
         },
         "label_share": {
-            k: {n: float((v == n).mean()) for n in names} for k, v in oos_sources.items()
+            k: {n: float((v == n).mean()) if len(v) else 0.0 for n in names}
+            for k, v in oos_sources.items()
         },
     }
     result["summary"] = summarize(result)

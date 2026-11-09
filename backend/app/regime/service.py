@@ -17,11 +17,15 @@ Run: ``python -m app.regime.service``
 
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
 import shutil
+import tempfile
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -57,22 +61,61 @@ def read_json(path: Path):
     return json.loads(path.read_text())
 
 
-def train(settings: Settings | None = None, n_jobs: int = -1) -> dict:
-    """Full retrain. Thread-safe: concurrent calls wait for the running one."""
-    with _train_lock:
-        return _train(settings or get_settings(), n_jobs)
+class TrainingInProgressError(RuntimeError):
+    """Raised by a non-blocking ``train`` call while another run holds the lock."""
+
+
+@contextmanager
+def _training_lock(settings: Settings, blocking: bool) -> Iterator[None]:
+    """Thread lock (this process) + ``flock`` on a lock file (other processes, e.g. the CLI)."""
+    if not _train_lock.acquire(blocking=blocking):
+        raise TrainingInProgressError("training already running")
+    try:
+        settings.processed_dir.mkdir(parents=True, exist_ok=True)
+        with open(settings.processed_dir / ".regime_train.lock", "w") as fh:
+            flags = fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB)
+            try:
+                fcntl.flock(fh, flags)
+            except BlockingIOError as exc:
+                raise TrainingInProgressError("training already running") from exc
+            try:
+                yield
+            finally:
+                fcntl.flock(fh, fcntl.LOCK_UN)
+    finally:
+        _train_lock.release()
+
+
+def is_training() -> bool:
+    return _train_lock.locked()
+
+
+def train(settings: Settings | None = None, n_jobs: int = -1, blocking: bool = True) -> dict:
+    """Full retrain. With ``blocking=False`` raises ``TrainingInProgressError`` instead of
+    waiting for a run already in progress (in this or another process)."""
+    settings = settings or get_settings()
+    with _training_lock(settings, blocking):
+        return _train(settings, n_jobs)
 
 
 def _train(settings: Settings, n_jobs: int) -> dict:
     t0 = time.perf_counter()
-    cfg = settings.regime
     final = settings.regime_dir
     # Build every artifact in a staging directory and swap it in only after success, so a
     # failed or in-progress run never leaves a mix of old and new artifacts for the API.
-    out = final.with_name(final.name + ".staging")
-    if out.exists():
-        shutil.rmtree(out)
-    out.mkdir(parents=True)
+    final.parent.mkdir(parents=True, exist_ok=True)
+    out = Path(tempfile.mkdtemp(prefix=final.name + ".staging-", dir=final.parent))
+    try:
+        summary = _train_into(settings, out, t0, n_jobs)
+    except BaseException:
+        shutil.rmtree(out, ignore_errors=True)
+        raise
+    _swap_in(out, final)
+    return summary
+
+
+def _train_into(settings: Settings, out: Path, t0: float, n_jobs: int) -> dict:
+    cfg = settings.regime
 
     panel = load_panel().set_index("date").sort_index()
     feats = build_features(panel.reset_index(), cfg)
@@ -153,7 +196,6 @@ def _train(settings: Settings, n_jobs: int) -> dict:
         },
     }
     write_json(out / "train_summary.json", summary)
-    _swap_in(out, final)
     log.info("regime training done in %.1fs", summary["runtime_s"])
     return summary
 

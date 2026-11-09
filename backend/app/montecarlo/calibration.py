@@ -35,7 +35,9 @@ def calibrate_log_ou(level: np.ndarray, next_level: np.ndarray) -> dict:
     resid = y - (a + b * x)
     sigma = float(resid.std(ddof=2) / np.sqrt(DT))
     kappa = float(-b / DT)
-    theta = float(np.exp(-a / b)) if b < 0 else None
+    # theta is only meaningful for a mean-reverting fit; guard overflow when b is ~0.
+    log_theta = -a / b if b < 0 else None
+    theta = float(np.exp(log_theta)) if log_theta is not None and log_theta < 50 else None
     return {
         "n": int(n),
         "kappa": kappa,

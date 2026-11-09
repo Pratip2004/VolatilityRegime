@@ -103,9 +103,7 @@ class RegimeLatest(_Model):
 
 class HistoryRow(_Model):
     date: str
-    p_calm: float
-    p_stressed: float
-    p_panic: float
+    probabilities: Probabilities
     raw_label: str
     smoothed_label: str
     baseline_label: str
