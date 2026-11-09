@@ -132,3 +132,54 @@ def test_config_rejects_bad_values() -> None:
         RegimeConfig(n_states=5)
     with pytest.raises(ValueError):
         RegimeConfig(features=["vix_ratio"])
+
+
+def test_vx_expiry_good_friday_2008() -> None:
+    # Third Friday of March 2008 was Good Friday, so Feb-2008 VX expired Tuesday 2008-02-19.
+    assert sources.good_friday(2008) == date(2008, 3, 21)
+    assert sources.vx_expiry(2008, 2) == date(2008, 2, 19)
+
+
+def test_vx_stale_cache_detection(tmp_path, monkeypatch) -> None:
+    import os
+
+    from app.core.config import Settings
+
+    monkeypatch.setattr(sources, "get_settings", lambda: Settings(data_dir=tmp_path))
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    f = raw / "cboe_vx_2026-11-18.csv"
+    assert sources._vx_stale(f.name, date(2026, 11, 18))  # missing → stale
+    f.write_text("x")
+    ts = pd.Timestamp("2026-11-06").timestamp()
+    os.utime(f, (ts, ts))
+    assert sources._vx_stale(f.name, date(2026, 11, 18))  # cached before expiry
+    ts = pd.Timestamp("2026-11-20").timestamp()
+    os.utime(f, (ts, ts))
+    assert not sources._vx_stale(f.name, date(2026, 11, 18))  # cached after expiry: final
+
+
+def test_continuous_vx_later_frame_wins_on_overlap() -> None:
+    a = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2013-01-02"]),
+            "price": [16.75],
+            "expiry": pd.to_datetime(["2013-01-16"]),
+        }
+    )
+    b = a.assign(price=[16.72])
+    c = a.assign(price=[18.0], expiry=pd.to_datetime(["2013-02-13"]))
+    vx = sources.continuous_vx(pd.concat([a, c, b], ignore_index=True))
+    assert vx.loc["2013-01-02", "vx1"] == 16.72
+
+
+def test_assemble_panel_ffill_limit() -> None:
+    from app.data.build_dataset import MAX_FFILL
+
+    days = pd.bdate_range("2020-01-01", periods=12)
+    full = pd.Series(1.0, index=days)
+    holey = pd.Series(1.0, index=days[:2].append(days[2 + MAX_FFILL + 1 :]))
+    series = {c: full for c in ["vix", "vix3m", "vvix", "vx1", "vx2", "spx_close", "uvxy_close"]}
+    series["vvix"] = holey
+    panel, _ = assemble_panel(series, "2020-01-01")
+    assert panel["vvix"].isna().sum() == 1

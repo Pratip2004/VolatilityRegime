@@ -117,15 +117,33 @@ def fetch_yahoo_close(ticker: str, start: str, refresh: bool = False) -> pd.Seri
 # ---------------------------------------------------------------------------------------------
 
 
-def vx_expiry(year: int, month: int) -> date:
-    """Standard VX expiry: the Wednesday 30 days before the third Friday of the following month.
+def good_friday(year: int) -> date:
+    """Good Friday (anonymous Gregorian Easter algorithm minus two days)."""
+    a, b, c = year % 19, year // 100, year % 100
+    d, e = b // 4, b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = c // 4, c % 4
+    l_ = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l_) // 451
+    month = (h + l_ - 7 * m + 114) // 31
+    day = (h + l_ - 7 * m + 114) % 31 + 1
+    return date(year, month, day) - timedelta(days=2)
 
-    Exchange-holiday adjustments are not applied; only used to place archive contracts (2007-2012)
-    where none occurred for monthly contracts.
+
+def vx_expiry(year: int, month: int) -> date:
+    """Standard VX expiry: 30 days before the third Friday of the following month (a Wednesday).
+
+    If that Friday is an exchange holiday (in practice Good Friday, e.g. March 2008) the business
+    day before it is used, so expiry moves to the Tuesday. Only used for archive contracts; the
+    per-expiry files carry Cboe's own expiry dates.
     """
     ny, nm = (year + 1, 1) if month == 12 else (year, month + 1)
     first = date(ny, nm, 1)
     third_friday = first + timedelta(days=(4 - first.weekday()) % 7 + 14)
+    if third_friday == good_friday(ny):
+        third_friday -= timedelta(days=1)
     return third_friday - timedelta(days=30)
 
 
@@ -162,7 +180,6 @@ def fetch_vx_contracts(start: str, refresh: bool = False) -> pd.DataFrame:
     only live contracts are re-downloaded on ``refresh``.
     """
     start_d = pd.Timestamp(start).date()
-    today = date.today()
     frames: list[pd.DataFrame] = []
 
     # Archive contracts.
@@ -184,15 +201,25 @@ def fetch_vx_contracts(start: str, refresh: bool = False) -> pd.DataFrame:
         if exp < start_d:
             continue
         name = f"cboe_vx_{exp.isoformat()}.csv"
-        live = exp >= today
         try:
-            content = _cached(name, VX_NEW_URL.format(path=item["path"]), refresh and live)
+            content = _cached(
+                name, VX_NEW_URL.format(path=item["path"]), refresh and _vx_stale(name, exp)
+            )
         except requests.HTTPError as exc:  # pragma: no cover - network
             log.warning("missing VX file %s: %s", item["path"], exc)
             continue
         frames.append(_parse_vx_file(content, exp))
 
     return pd.concat(frames, ignore_index=True)
+
+
+def _vx_stale(name: str, expiry: date) -> bool:
+    """A cached contract file is stale if it was written on or before its expiry date (it may be
+    missing the contract's final trading days). Files written after expiry are final."""
+    path = get_settings().raw_dir / name
+    if not path.exists():
+        return True
+    return date.fromtimestamp(path.stat().st_mtime) <= expiry
 
 
 def continuous_vx(contracts: pd.DataFrame) -> pd.DataFrame:
@@ -202,7 +229,8 @@ def continuous_vx(contracts: pd.DataFrame) -> pd.DataFrame:
     (VX stops trading the day before its expiry), so no data after ``t`` is used.
     """
     df = contracts[contracts["date"] < contracts["expiry"]]
-    df = df.sort_values(["date", "expiry"])
+    # Frames are appended archive-first, so with a stable sort "last" = per-expiry file wins.
+    df = df.sort_values(["date", "expiry"], kind="stable")
     df = df.drop_duplicates(["date", "expiry"], keep="last")
     df["rank"] = df.groupby("date").cumcount()
     wide = df[df["rank"] < 2].pivot(index="date", columns="rank", values="price")
