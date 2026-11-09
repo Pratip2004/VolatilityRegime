@@ -119,6 +119,19 @@ describe('Explorer (RegimeHistoryPage)', () => {
     expect(screen.getByText('what actually happened')).toBeInTheDocument()
   })
 
+  it('opens a day from the table with the keyboard and steps to the next day', async () => {
+    mockFetch(ok)
+    renderExplorer('/explorer?start=2013-12-01&end=2014-01-31&view=table')
+    const table = await screen.findByRole('table')
+    const firstRow = within(table).getAllByRole('row')[1] // newest day first
+    firstRow.focus()
+    await userEvent.keyboard('{Enter}')
+    expect(await screen.findByText('Friday 3 January 2014')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Previous trading day' }))
+    expect(await screen.findByText('Thursday 2 January 2014')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Next trading day' })).toBeEnabled()
+  })
+
   it('renders the calendar by default and an empty message for an empty range', async () => {
     mockFetch(ok)
     renderExplorer('/explorer?start=2013-12-01&end=2014-01-31')

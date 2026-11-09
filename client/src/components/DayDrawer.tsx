@@ -1,6 +1,7 @@
-import { Descriptions, Drawer, Progress, Space, Typography } from 'antd'
+import { LeftOutlined, RightOutlined } from '@ant-design/icons'
+import { Button, Descriptions, Drawer, Progress, Space, Typography } from 'antd'
 import dayjs from 'dayjs'
-import { REGIME_NAMES, num, pct, price, regimeColor, signedPct } from '../lib/regime'
+import { REGIME_NAMES, num, price, probPct, regimeColor, signedPct } from '../lib/regime'
 import type { HistoryRow, RegimeEpisode } from '../types/regime'
 import { RegimeTag } from './RegimeBits'
 
@@ -10,16 +11,42 @@ interface Props {
   row: HistoryRow | null
   episode: RegimeEpisode | null
   onClose: () => void
+  /** Open another day (previous/next trading day, spell start/end). */
+  onNavigate?: (date: string) => void
+  prevDate?: string | null
+  nextDate?: string | null
+  /** First out-of-sample date; earlier days were inside the first training window. */
+  oosStart?: string | null
 }
 
 /** Details for one trading day and the regime spell it belongs to. */
-export function DayDrawer({ row, episode, onClose }: Props) {
+export function DayDrawer({ row, episode, onClose, onNavigate, prevDate, nextDate, oosStart }: Props) {
   return (
     <Drawer
       open={Boolean(row)}
       onClose={onClose}
       width={420}
       title={row ? dayjs(row.date).format('dddd D MMMM YYYY') : ''}
+      extra={
+        onNavigate && (
+          <Space size={4}>
+            <Button
+              size="small"
+              icon={<LeftOutlined />}
+              disabled={!prevDate}
+              onClick={() => prevDate && onNavigate(prevDate)}
+              aria-label="Previous trading day"
+            />
+            <Button
+              size="small"
+              icon={<RightOutlined />}
+              disabled={!nextDate}
+              onClick={() => nextDate && onNavigate(nextDate)}
+              aria-label="Next trading day"
+            />
+          </Space>
+        )
+      }
       destroyOnClose
     >
       {row && (
@@ -34,7 +61,8 @@ export function DayDrawer({ row, episode, onClose }: Props) {
             </Space>
             {row.in_sample && (
               <Paragraph type="secondary" className="mt-2 text-xs" style={{ marginBottom: 0 }}>
-                In-sample date (2008–2013): the model was trained on this period.
+                In-sample date{oosStart ? ` (before ${oosStart})` : ''}: the model was trained on this
+                period, so its label here is not a real-time test.
               </Paragraph>
             )}
           </div>
@@ -51,7 +79,7 @@ export function DayDrawer({ row, episode, onClose }: Props) {
                   size="small"
                   className="flex-1"
                   style={{ margin: 0 }}
-                  format={(p) => <span className="num">{p?.toFixed(0)}%</span>}
+                  format={() => <span className="num">{probPct(row.probabilities[n])}</span>}
                 />
               </div>
             ))}
@@ -102,12 +130,22 @@ export function DayDrawer({ row, episode, onClose }: Props) {
                   {episode.previous_regime ?? '—'} → {episode.next_regime ?? 'still running'}
                 </Descriptions.Item>
               </Descriptions>
+              {onNavigate && (
+                <Space size={8} className="mt-1">
+                  <Button size="small" disabled={episode.start === row.date} onClick={() => onNavigate(episode.start)}>
+                    Spell start
+                  </Button>
+                  <Button size="small" disabled={episode.end === row.date} onClick={() => onNavigate(episode.end)}>
+                    Spell end
+                  </Button>
+                </Space>
+              )}
             </div>
           )}
 
           <Text type="secondary" className="text-xs">
             Probabilities use only data up to that day's close (the model gave{' '}
-            {row.smoothed_label} {pct(row.probabilities[row.smoothed_label], 0)}). The next-day
+            {row.smoothed_label} {probPct(row.probabilities[row.smoothed_label])}). The next-day
             move and the spell's outcome are shown for context; they weren't known at the time.
           </Text>
         </Space>

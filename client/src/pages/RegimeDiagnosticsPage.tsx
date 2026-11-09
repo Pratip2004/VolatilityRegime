@@ -130,7 +130,7 @@ function TransitionCard({ d }: { d: RegimeDiagnostics }) {
   ]
   return (
     <Card title="Transition matrix (live model, daily)" size="small" className="h-full">
-      <Table rowKey="from" size="small" pagination={false} columns={columns} dataSource={data} />
+      <Table scroll={{ x: true }} rowKey="from" size="small" pagination={false} columns={columns} dataSource={data} />
       <Text type="secondary" className="text-xs">
         Row = today's state, column = tomorrow's. Darker cells = higher probability.
       </Text>
@@ -216,7 +216,7 @@ function ComparisonCard({
             : `HMM is not clearly better than the baseline (HMM wins ${hmmWins}, baseline wins ${baseWins} of ${rows.length} checks)`
         }
       />
-      <Table
+      <Table scroll={{ x: true }}
         rowKey="check"
         size="small"
         pagination={false}
@@ -404,7 +404,7 @@ function DurationCard({ d }: { d: RegimeDiagnostics }) {
           </ResponsiveContainer>
         </Col>
         <Col xs={24} lg={8}>
-          <Table
+          <Table scroll={{ x: true }}
             rowKey="name"
             size="small"
             pagination={false}
@@ -430,7 +430,7 @@ function VixParamsCard({ d }: { d: RegimeDiagnostics }) {
   ]
   return (
     <Card title="Spot-VIX process by regime (for the Monte Carlo simulator)" size="small" className="h-full">
-      <Table
+      <Table scroll={{ x: true }}
         rowKey="name"
         size="small"
         pagination={false}
@@ -462,7 +462,7 @@ function RestartsCard({ d }: { d: RegimeDiagnostics }) {
   const best = Math.max(...d.restarts.map((r) => r.log_likelihood ?? -Infinity))
   return (
     <Card title="Live fit: restart log-likelihoods" size="small" className="h-full">
-      <Table
+      <Table scroll={{ x: true }}
         rowKey="seed"
         size="small"
         pagination={false}

@@ -42,6 +42,26 @@ export function signedPct(x: number | null | undefined, digits = 1): string {
   return `${x > 0 ? '+' : ''}${s}%`
 }
 
+/** Probability as a percent that never claims certainty: ">99%" / "<1%" at the extremes. */
+export function probPct(x: number | null | undefined): string {
+  if (x === null || x === undefined || !Number.isFinite(x)) return '—'
+  if (x > 0.995) return '>99%'
+  if (x < 0.005) return '<1%'
+  return `${Math.round(x * 100)}%`
+}
+
+/** Chance of a next-day move larger than ``threshold`` in either direction. */
+type MoveOdds = Partial<
+  Record<`prob_up_${10 | 20 | 30}` | `prob_down_${10 | 20 | 30}`, number | null>
+>
+
+export function bigMoveProb(r: MoveOdds, threshold: 10 | 20 | 30): number | null {
+  const up = r[`prob_up_${threshold}`]
+  const down = r[`prob_down_${threshold}`]
+  if (up === null || up === undefined) return null
+  return up + (down ?? 0)
+}
+
 /** Price with thousands separators (split-adjusted UVXY can be in the hundreds of thousands). */
 export function price(x: number | null | undefined): string {
   if (x === null || x === undefined || !Number.isFinite(x)) return '—'
@@ -188,8 +208,11 @@ export function downloadCsv(filename: string, csv: string) {
   const a = document.createElement('a')
   a.href = url
   a.download = filename
+  document.body.appendChild(a)
   a.click()
-  URL.revokeObjectURL(url)
+  a.remove()
+  // Revoke later: some browsers (Safari) start the download asynchronously.
+  window.setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }
 
 // ---------------------------------------------------------------- explorer URL state

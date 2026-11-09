@@ -48,6 +48,9 @@ export interface RiskStats {
   prob_up_10: number | null
   prob_up_20: number | null
   prob_up_30: number | null
+  prob_down_10?: number | null
+  prob_down_20?: number | null
+  prob_down_30?: number | null
   next_regime_prob: Probabilities
 }
 

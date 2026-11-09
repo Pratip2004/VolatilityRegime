@@ -128,11 +128,9 @@ def current_spell(hist: pd.DataFrame, eps: list[dict], profiles: dict[str, dict]
     cur = eps[-1]
     lengths = np.array(profiles[cur["regime"]]["spell_lengths"])
     longer_than = float((lengths < cur["days"]).mean()) if len(lengths) else None
-    still_running = (
-        float((lengths > cur["days"]).sum() / max((lengths >= cur["days"]).sum(), 1))
-        if len(lengths)
-        else None
-    )
+    reached = int((lengths >= cur["days"]).sum())
+    # None when no past spell lasted this long: there is nothing to compare with.
+    still_running = float((lengths > cur["days"]).sum() / reached) if reached else None
     return cur | {
         "longer_than_share": longer_than,
         # Of past spells that reached today's length, the share that went on for at least

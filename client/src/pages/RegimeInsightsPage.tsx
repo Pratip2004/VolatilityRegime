@@ -2,7 +2,7 @@ import { ArrowRightOutlined } from '@ant-design/icons'
 import { Button, Segmented, Space, Table, Tag, Typography } from 'antd'
 import type { TableColumnsType } from 'antd'
 import dayjs from 'dayjs'
-import { useMemo } from 'react'
+import { useMemo, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { useRegimeInsights } from '../api/regime'
@@ -12,6 +12,7 @@ import { RangeStrip } from '../components/RangeStrip'
 import {
   REGIME_NAMES,
   SIZE_NOT_DIRECTION,
+  bigMoveProb,
   days,
   explorerHref,
   num,
@@ -63,10 +64,12 @@ function Insights({ d }: { d: RegimeInsights }) {
     ? (params.get('regime') as RegimeName)
     : d.current.regime
   const domain = sharedDomain(d.profiles)
-  const select = (r: RegimeName) => {
+  const deepRef = useRef<HTMLElement>(null)
+  const select = (r: RegimeName, scroll = false) => {
     const p = new URLSearchParams(params)
     p.set('regime', r)
     setParams(p, { replace: true })
+    if (scroll) deepRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
   return (
@@ -87,20 +90,20 @@ function Insights({ d }: { d: RegimeInsights }) {
               domain={domain}
               current={d.current.regime === n}
               active={sel === n}
-              onOpen={() => select(n)}
+              onOpen={() => select(n, true)}
             />
           ))}
         </div>
       </section>
 
-      <section className="panel p-5" aria-labelledby="deep-dive">
+      <section ref={deepRef} className="panel p-5" aria-labelledby="deep-dive" style={{ scrollMarginTop: 16 }}>
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h2 id="deep-dive" className="font-display m-0 text-xl font-semibold">
             Deep dive
           </h2>
           <Segmented<RegimeName>
             value={sel}
-            onChange={select}
+            onChange={(r) => select(r)}
             options={REGIME_NAMES.map((n) => ({
               value: n,
               label: (
@@ -166,7 +169,7 @@ function ProfileCard({
             <span className="num">
               {signedPct(r.p25)} to {signedPct(r.p75)}
             </span>
-            . A rise above +20% happened {oneIn(r.prob_up_20)}.
+            . A move bigger than 20% either way came {oneIn(bigMoveProb(r, 20))}.
           </Text>
         </div>
 
@@ -258,7 +261,7 @@ function DeepDive({ name, d, domain }: { name: RegimeName; d: RegimeInsights; do
     <div className="flex flex-col gap-8">
       <div className="grid gap-6 lg:grid-cols-2">
         <div>
-          <h3 className="font-display mb-1 mt-0 text-lg font-semibold">What it means for tomorrow</h3>
+          <h3 className="font-display mb-1 mt-0 text-lg font-semibold">What the next day has looked like</h3>
           <Paragraph type="secondary" className="text-[13px]">
             On <span className="num">{r.count.toLocaleString()}</span> past {name} days, the next
             day's UVXY move was:
@@ -269,8 +272,8 @@ function DeepDive({ name, d, domain }: { name: RegimeName; d: RegimeInsights; do
             <Stat label="Average daily swing (std)" value={pct(r.std)} />
             <Stat label="1-in-100 day, down" value={signedPct(r.p1)} />
             <Stat label="1-in-100 day, up" value={signedPct(r.p99)} />
-            <Stat label="Up more than +10%" value={oneIn(r.prob_up_10)} />
-            <Stat label="Up more than +20%" value={oneIn(r.prob_up_20)} />
+            <Stat label="Moved more than 10% (either way)" value={oneIn(bigMoveProb(r, 10))} />
+            <Stat label="Moved more than 20% (either way)" value={oneIn(bigMoveProb(r, 20))} />
           </div>
           <Text type="secondary" className="mt-2 block text-xs">
             {SIZE_NOT_DIRECTION}
@@ -326,17 +329,28 @@ function DeepDive({ name, d, domain }: { name: RegimeName; d: RegimeInsights; do
           columns={columns}
           dataSource={eps}
           pagination={{ pageSize: 10, showSizeChanger: false, showTotal: (t) => `${t} episodes` }}
-          onRow={(e) => ({
-            onClick: () =>
+          onRow={(e) => {
+            const open = () =>
               navigate(
                 explorerHref({
                   start: dayjs(e.start).subtract(1, 'month').format('YYYY-MM-DD'),
                   end: dayjs(e.end).add(1, 'month').format('YYYY-MM-DD'),
                   day: e.start,
                 }),
-              ),
-            style: { cursor: 'pointer' },
-          })}
+              )
+            return {
+              onClick: open,
+              onKeyDown: (ev) => {
+                if (ev.key === 'Enter' || ev.key === ' ') {
+                  ev.preventDefault()
+                  open()
+                }
+              },
+              tabIndex: 0,
+              className: 'cell-focus',
+              style: { cursor: 'pointer' },
+            }
+          }}
           scroll={{ x: true }}
         />
       </div>
@@ -399,8 +413,10 @@ function YearlySection({ d }: { d: RegimeInsights }) {
                 ) : null,
               )}
             </div>
-            <span className="w-20 text-[11px]" style={{ color: 'var(--ink-3)' }}>
-              {y.in_sample ? 'in-sample' : ''}
+            <span className="w-24 text-[11px]" style={{ color: 'var(--ink-3)' }}>
+              {[y.in_sample ? 'in-sample' : '', y.days < 245 ? `${y.days} days so far` : '']
+                .filter(Boolean)
+                .join(' · ')}
             </span>
           </button>
         ))}

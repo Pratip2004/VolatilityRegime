@@ -2,7 +2,7 @@ import { DownloadOutlined } from '@ant-design/icons'
 import { Button, DatePicker, Segmented, Space, Table, Tag, Typography } from 'antd'
 import type { TableColumnsType, TimeRangePickerProps } from 'antd'
 import dayjs from 'dayjs'
-import { useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   Area,
@@ -59,6 +59,11 @@ export default function RegimeExplorerPage() {
     end: last,
   })
 
+  // Stable references so memoised children (calendar years) don't re-render needlessly.
+  const regimesKey = f.regimes.join(',')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const selectedRegimes = useMemo(() => f.regimes, [regimesKey])
+
   const update = (patch: Partial<ExplorerFilters>) => {
     const next = { ...f, ...patch }
     const p = new URLSearchParams()
@@ -81,7 +86,26 @@ export default function RegimeExplorerPage() {
     return c
   }, [inRange])
 
-  const dayRow = f.day ? all.find((r) => r.date === f.day) ?? null : null
+  const dayIndex = f.day ? all.findIndex((r) => r.date === f.day) : -1
+  const dayRow = dayIndex >= 0 ? all[dayIndex] : null
+  const prevDate = dayIndex > 0 ? all[dayIndex - 1].date : null
+  const nextDate = dayIndex >= 0 && dayIndex < all.length - 1 ? all[dayIndex + 1].date : null
+  const openDay = useCallback(
+    (day: string) => {
+      const p = new URLSearchParams(params)
+      p.set('day', day)
+      setParams(p, { replace: true })
+    },
+    [params, setParams],
+  )
+  const ribbonDays = useMemo(
+    () => inRange.map((r) => ({ date: r.date, label: r.smoothed_label })),
+    [inRange],
+  )
+  const ribbonColor = useCallback(
+    (label: string) => ((selectedRegimes as string[]).includes(label) ? regimeColor(label) : '#e6e8ec'),
+    [selectedRegimes],
+  )
   const dayEpisode =
     f.day && insights.data
       ? insights.data.episodes.find((e) => e.start <= f.day! && e.end >= f.day!) ?? null
@@ -208,9 +232,11 @@ export default function RegimeExplorerPage() {
             </Space>
           </div>
           <RegimeRibbon
-            days={inRange.map((r) => ({ date: r.date, label: r.smoothed_label }))}
+            days={ribbonDays}
             height={28}
-            onSelect={(day) => update({ day })}
+            onSelect={openDay}
+            colorOf={ribbonColor}
+            markLatest={f.end >= last}
           />
         </div>
 
@@ -222,15 +248,15 @@ export default function RegimeExplorerPage() {
           <div className="panel p-4">
             <CalendarHeatmap
               rows={inRange}
-              regimes={f.regimes}
+              regimes={selectedRegimes}
               selectedDay={f.day}
-              onSelect={(day) => update({ day })}
+              onSelect={openDay}
             />
           </div>
         ) : f.view === 'table' ? (
-          <DayTable rows={shown} onSelect={(day) => update({ day })} />
+          <DayTable rows={shown} onSelect={openDay} />
         ) : (
-          <ChartView rows={inRange} />
+          <ChartView rows={inRange} regimes={selectedRegimes} />
         )}
 
         {shown.length === 0 && inRange.length > 0 && (
@@ -240,7 +266,15 @@ export default function RegimeExplorerPage() {
         )}
       </PageState>
 
-      <DayDrawer row={dayRow} episode={dayEpisode as RegimeEpisode | null} onClose={() => update({ day: null })} />
+      <DayDrawer
+        row={dayRow}
+        episode={dayEpisode as RegimeEpisode | null}
+        onClose={() => update({ day: null })}
+        onNavigate={openDay}
+        prevDate={prevDate}
+        nextDate={nextDate}
+        oosStart={insights.data?.oos_start}
+      />
     </div>
   )
 }
@@ -324,7 +358,18 @@ function DayTable({ rows, onSelect }: { rows: HistoryRow[]; onSelect: (d: string
         columns={columns}
         dataSource={data}
         pagination={{ pageSize: 50, showSizeChanger: false, showTotal: (t) => `${t.toLocaleString()} days` }}
-        onRow={(r) => ({ onClick: () => onSelect(r.date), style: { cursor: 'pointer' } })}
+        onRow={(r) => ({
+          onClick: () => onSelect(r.date),
+          onKeyDown: (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              onSelect(r.date)
+            }
+          },
+          tabIndex: 0,
+          className: 'cell-focus',
+          style: { cursor: 'pointer' },
+        })}
         scroll={{ x: true }}
       />
     </div>
@@ -377,8 +422,13 @@ function ChartTip({
   )
 }
 
-function ChartView({ rows }: { rows: HistoryRow[] }) {
-  const spans = useMemo(() => labelSpans(rows, (r) => r.date, (r) => r.smoothed_label), [rows])
+function ChartView({ rows, regimes }: { rows: HistoryRow[]; regimes: string[] }) {
+  // Bands only for the regimes selected in the filter.
+  const spans = useMemo(
+    () =>
+      labelSpans(rows, (r) => r.date, (r) => r.smoothed_label).filter((sp) => regimes.includes(sp.label)),
+    [rows, regimes],
+  )
   const data = useMemo(
     () =>
       rows.map((r) => ({

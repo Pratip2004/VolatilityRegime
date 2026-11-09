@@ -62,6 +62,9 @@ class RiskStats(_Model):
     prob_up_10: float | None = None
     prob_up_20: float | None = None
     prob_up_30: float | None = None
+    prob_down_10: float | None = None
+    prob_down_20: float | None = None
+    prob_down_30: float | None = None
     next_regime_prob: Probabilities = {}
 
 

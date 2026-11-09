@@ -129,6 +129,7 @@ def test_risk_stats_use_label_at_t_and_return_t_to_t1() -> None:
     assert rs["Panic"]["count"] == 2
     assert rs["Panic"]["mean"] == pytest.approx((0.30 - 0.50) / 2)
     assert rs["Panic"]["prob_up_20"] == pytest.approx(0.5)
+    assert rs["Panic"]["prob_down_20"] == pytest.approx(0.5)  # the -50% day
     assert rs["Calm"]["count"] == 3 and rs["Calm"]["mean"] == pytest.approx(0.0)
     assert rs["Stressed"]["count"] == 0
     assert rs["Panic"]["next_regime_prob"]["Calm"] == pytest.approx(1.0)

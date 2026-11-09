@@ -8,6 +8,8 @@ import {
   orderedNames,
   niceTicks,
   pct,
+  probPct,
+  bigMoveProb,
   regimeColor,
   signedPct,
   verdict,
@@ -78,5 +80,14 @@ describe('regime helpers', () => {
     expect(orderedNames(['Elevated', 'Panic', 'Calm'])).toEqual(['Calm', 'Panic', 'Elevated'])
     expect(mostSevere(['Calm', 'Panic'])).toBe('Panic')
     expect(mostSevere(['Calm', 'Stressed'])).toBe('Stressed')
+  })
+
+  it('never shows certainty and sums both tails for big moves', () => {
+    expect(probPct(0.99999)).toBe('>99%')
+    expect(probPct(0.000001)).toBe('<1%')
+    expect(probPct(0.42)).toBe('42%')
+    const r = { prob_up_10: 0.1, prob_up_20: 0.03, prob_up_30: 0.01, prob_down_20: 0.02 }
+    expect(bigMoveProb(r, 20)).toBeCloseTo(0.05)
+    expect(bigMoveProb(r, 10)).toBeCloseTo(0.1) // missing down tail counts as 0
   })
 })

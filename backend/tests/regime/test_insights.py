@@ -61,3 +61,14 @@ def test_build_insights_profiles_and_current_spell() -> None:
     cur = ins["current"]
     assert cur["regime"] == "Stressed" and cur["days"] == 3 and cur["ongoing"]
     assert cur["longer_than_share"] is None  # no completed Stressed spells to compare
+
+
+def test_continued_share_is_none_when_spell_is_longer_than_all_past_spells() -> None:
+    h = _hist()
+    # Make the final Stressed spell 3 days and give Stressed a completed 2-day spell earlier.
+    h.iloc[4:7, h.columns.get_loc("smoothed_label")] = ["Stressed", "Stressed", "Panic"]
+    ins = build_insights(h, NAMES, {n: {"count": 0} for n in NAMES}, "2013-12-31")
+    assert ins["current"]["regime"] == "Stressed" and ins["current"]["days"] == 3
+    assert ins["profiles"]["Stressed"]["spell_lengths"] == [2]
+    assert ins["current"]["continued_share"] is None
+    assert ins["current"]["longer_than_share"] == 1.0

@@ -10,20 +10,33 @@ export interface RibbonDay {
 interface Props {
   days: RibbonDay[]
   height?: number
-  /** Called with the date under the pointer when the ribbon is clicked. */
+  /** Called with the chosen date (click, or Enter after moving with the arrow keys). */
   onSelect?: (date: string) => void
   /** Show year ticks under the ribbon. */
   showYears?: boolean
+  /** Draw the "today" marker at the right edge (only when the last day is the latest date). */
+  markLatest?: boolean
+  /** Colour for a label; defaults to the regime colours. */
+  colorOf?: (label: string) => string
   ariaLabel?: string
 }
 
 /**
  * Every trading day as one thin vertical strip coloured by regime — the app's signature view.
  * One unit of width per day; spells are drawn as single rects so thousands of days stay cheap.
+ * Keyboard: focus it, move with ←/→ (Shift = 20 days, Home/End), Enter opens the day.
  */
-export function RegimeRibbon({ days, height = 44, onSelect, showYears = true, ariaLabel }: Props) {
+export function RegimeRibbon({
+  days,
+  height = 44,
+  onSelect,
+  showYears = true,
+  markLatest = false,
+  colorOf = regimeColor,
+  ariaLabel,
+}: Props) {
   const ref = useRef<HTMLDivElement>(null)
-  const [hover, setHover] = useState<number | null>(null)
+  const [cursor, setCursor] = useState<number | null>(null)
   const n = days.length
 
   const spans = useMemo(() => {
@@ -44,7 +57,6 @@ export function RegimeRibbon({ days, height = 44, onSelect, showYears = true, ar
         prev = y
       }
     })
-    // Thin out labels when many years are shown.
     const step = out.length > 12 ? 2 : 1
     return out.filter((_, i) => i % step === 0 || i === 0)
   }, [days])
@@ -59,65 +71,78 @@ export function RegimeRibbon({ days, height = 44, onSelect, showYears = true, ar
     return Math.max(0, Math.min(n - 1, i))
   }
 
-  const hovered = hover !== null ? days[hover] : null
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    const at = cursor ?? n - 1
+    const big = e.shiftKey ? 20 : 1
+    const moves: Record<string, number> = {
+      ArrowLeft: at - big,
+      ArrowRight: at + big,
+      Home: 0,
+      End: n - 1,
+    }
+    if (e.key in moves) {
+      e.preventDefault()
+      setCursor(Math.max(0, Math.min(n - 1, moves[e.key])))
+    } else if ((e.key === 'Enter' || e.key === ' ') && onSelect) {
+      e.preventDefault()
+      onSelect(days[at].date)
+    }
+  }
+
+  const shown = cursor !== null ? days[cursor] : null
   const last = days[n - 1]
+  const frac = (cursor ?? 0) / n
 
   return (
     <div className="relative select-none">
       <div
         ref={ref}
-        role={onSelect ? 'button' : 'img'}
+        role={onSelect ? 'slider' : 'img'}
         tabIndex={onSelect ? 0 : undefined}
         aria-label={
-          ariaLabel ??
-          `Regime by day from ${days[0].date} to ${last.date}; latest ${last.label}.`
+          ariaLabel ?? `Regime by day from ${days[0].date} to ${last.date}; latest ${last.label}.`
+        }
+        aria-valuemin={onSelect ? 0 : undefined}
+        aria-valuemax={onSelect ? n - 1 : undefined}
+        aria-valuenow={onSelect ? (cursor ?? n - 1) : undefined}
+        aria-valuetext={
+          onSelect ? `${days[cursor ?? n - 1].date}: ${days[cursor ?? n - 1].label}` : undefined
         }
         className="cell-focus relative overflow-hidden rounded-md"
         style={{ height, cursor: onSelect ? 'pointer' : 'default' }}
-        onMouseMove={(e) => setHover(indexAt(e.clientX))}
-        onMouseLeave={() => setHover(null)}
+        onMouseMove={(e) => setCursor(indexAt(e.clientX))}
+        onMouseLeave={() => setCursor(null)}
+        onBlur={() => setCursor(null)}
         onClick={(e) => {
           const i = indexAt(e.clientX)
           if (i !== null && onSelect) onSelect(days[i].date)
         }}
-        onKeyDown={(e) => {
-          if (onSelect && (e.key === 'Enter' || e.key === ' ')) {
-            e.preventDefault()
-            onSelect(last.date)
-          }
-        }}
+        onKeyDown={onKeyDown}
       >
-        <svg
-          viewBox={`0 0 ${n} 1`}
-          preserveAspectRatio="none"
-          width="100%"
-          height="100%"
-          aria-hidden
-        >
+        <svg viewBox={`0 0 ${n} 1`} preserveAspectRatio="none" width="100%" height="100%" aria-hidden>
           {spans.map((s) => (
-            <rect key={`${s.start}-${s.label}`} x={s.x} y={0} width={s.w} height={1} fill={regimeColor(s.label)} />
+            <rect key={`${s.start}-${s.label}`} x={s.x} y={0} width={s.w} height={1} fill={colorOf(s.label)} />
           ))}
-          {hover !== null && <rect x={hover} y={0} width={Math.max(1, n / 400)} height={1} fill="#14161b" />}
+          {cursor !== null && (
+            <rect x={cursor} y={0} width={Math.max(1, n / 400)} height={1} fill="#14161b" />
+          )}
         </svg>
-        {/* Today marker */}
-        <div
-          aria-hidden
-          className="absolute top-0 h-full"
-          style={{ right: 0, width: 3, background: 'var(--ink)' }}
-        />
+        {markLatest && (
+          <div aria-hidden className="absolute top-0 h-full" style={{ right: 0, width: 3, background: 'var(--ink)' }} />
+        )}
       </div>
 
-      {hovered && (
+      {shown && (
         <div
           className="pointer-events-none absolute -top-9 z-10 whitespace-nowrap rounded-md px-2 py-1 text-xs text-white shadow"
           style={{
-            left: `${((hover ?? 0) / n) * 100}%`,
-            transform: `translateX(${(hover ?? 0) / n > 0.85 ? '-100%' : (hover ?? 0) / n < 0.15 ? '0' : '-50%'})`,
+            left: `${frac * 100}%`,
+            transform: `translateX(${frac > 0.85 ? '-100%' : frac < 0.15 ? '0' : '-50%'})`,
             background: 'var(--ink)',
           }}
         >
-          <span className="num">{dayjs(hovered.date).format('D MMM YYYY')}</span> ·{' '}
-          <span style={{ color: regimeColor(hovered.label) }}>●</span> {hovered.label}
+          <span className="num">{dayjs(shown.date).format('D MMM YYYY')}</span> ·{' '}
+          <span style={{ color: regimeColor(shown.label) }}>●</span> {shown.label}
         </div>
       )}
 

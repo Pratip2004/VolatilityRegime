@@ -34,6 +34,7 @@ def _stats(r: np.ndarray) -> dict:
         out[f"p{q}"] = float(np.percentile(r, q))
     for th in MOVE_THRESHOLDS:
         out[f"prob_up_{int(th * 100)}"] = float((r > th).mean())
+        out[f"prob_down_{int(th * 100)}"] = float((r < -th).mean())
     return out
 
 

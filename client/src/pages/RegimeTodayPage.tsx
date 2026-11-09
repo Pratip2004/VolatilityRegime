@@ -19,8 +19,10 @@ import {
   featureDisplayValue,
   formatFeature,
   num,
+  bigMoveProb,
   oneIn,
   pct,
+  probPct,
   regimeColor,
   signedPct,
   zWords,
@@ -117,7 +119,7 @@ function Overview({ l, ins }: { l: RegimeLatest; ins: RegimeInsights }) {
             )}
             <div className="mt-4 flex flex-col gap-2 text-[15px] leading-relaxed" data-testid="summary">
               <Paragraph style={{ marginBottom: 0, fontSize: 15 }}>
-                The model puts <strong className="num">{pct(conf, 0)}</strong> on {label}
+                The model puts <strong className="num">{probPct(conf)}</strong> on {label}
                 {cur.previous_regime ? (
                   <>
                     , after a {cur.previous_regime} spell.
@@ -127,19 +129,21 @@ function Overview({ l, ins }: { l: RegimeLatest; ins: RegimeInsights }) {
                 )}
               </Paragraph>
               <Paragraph style={{ marginBottom: 0, fontSize: 15 }}>
-                On past {label} days, UVXY's next-day move was usually between{' '}
+                Historically, the day after a {label} day, UVXY usually moved between{' '}
                 <strong className="num">{signedPct(r.p25)}</strong> and{' '}
-                <strong className="num">{signedPct(r.p75)}</strong>. A jump above +20% came{' '}
-                <strong>{oneIn(r.prob_up_20)}</strong>.
+                <strong className="num">{signedPct(r.p75)}</strong>. A move bigger than 20% in
+                either direction came <strong>{oneIn(bigMoveProb(r, 20))}</strong>.
               </Paragraph>
               <Paragraph style={{ marginBottom: 0, fontSize: 15 }}>
                 {label} spells usually last <strong className="num">{days(profile.spell_median)}</strong>
-                {cur.continued_share !== null && (
+                {cur.continued_share !== null ? (
                   <>
                     ; of past spells that reached day {cur.days},{' '}
                     <strong className="num">{pct(cur.continued_share, 0)}</strong> kept going
                   </>
-                )}
+                ) : cur.longer_than_share === 1 ? (
+                  <>; at day {cur.days}, this one is already longer than every past {label} spell</>
+                ) : null}
                 .
               </Paragraph>
             </div>
@@ -160,14 +164,14 @@ function Overview({ l, ins }: { l: RegimeLatest; ins: RegimeInsights }) {
                     status="normal"
                     className="flex-1"
                     style={{ margin: 0 }}
-                    format={(p) => <span className="num text-[13px]">{p?.toFixed(0)}%</span>}
+                    format={() => <span className="num text-[13px]">{probPct(l.probabilities[n])}</span>}
                     aria-label={`${n} probability`}
                   />
                 </div>
               ))}
             </div>
             <div>
-              <div className="eyebrow mb-1">Tomorrow's typical range ({label})</div>
+              <div className="eyebrow mb-1">Next-day UVXY moves after past {label} days</div>
               <RangeStrip risk={r} regime={label} domain={domain} />
               <Text type="secondary" className="text-xs">
                 Solid bar: middle half of past next-day moves. Whiskers: 1-in-100 days.
@@ -179,7 +183,7 @@ function Overview({ l, ins }: { l: RegimeLatest; ins: RegimeInsights }) {
 
       <RibbonSection />
 
-      <div className="grid gap-5 lg:grid-cols-2">
+      <div className="grid gap-5 lg:grid-cols-2 [&>*]:min-w-0">
         <SpellCard l={l} ins={ins} />
         <ForecastCard l={l} />
       </div>
@@ -249,7 +253,7 @@ function Overview({ l, ins }: { l: RegimeLatest; ins: RegimeInsights }) {
                 <Text type="secondary" className="text-[13px]">
                   <span className="num" style={{ color: 'var(--ink)' }}>{pct(p.share_of_days, 0)}</span> of days ·
                   spells ~<span className="num" style={{ color: 'var(--ink)' }}>{num(p.spell_median, 0)}d</span> ·
-                  +20% {oneIn(p.risk.prob_up_20).replace('about ', '')}
+                  ±20% move {oneIn(bigMoveProb(p.risk, 20)).replace('about ', '')}
                 </Text>
               </Link>
             )
@@ -271,6 +275,7 @@ function RibbonSection() {
     const from = last.subtract(span === '1Y' ? 1 : 5, 'year').format('YYYY-MM-DD')
     return rows.filter((r) => r.date >= from)
   }, [rows, span])
+  const ribbonDays = useMemo(() => shown.map((r) => ({ date: r.date, label: r.smoothed_label })), [shown])
   if (!rows.length) return null
   return (
     <section className="panel p-5" aria-labelledby="ribbon">
@@ -286,7 +291,8 @@ function RibbonSection() {
         <Segmented<RibbonSpan> value={span} onChange={setSpan} options={['1Y', '5Y', 'All']} />
       </div>
       <RegimeRibbon
-        days={shown.map((r) => ({ date: r.date, label: r.smoothed_label }))}
+        days={ribbonDays}
+        markLatest
         height={56}
         onSelect={(day) =>
           navigate(
@@ -328,7 +334,12 @@ function SpellCard({ l, ins }: { l: RegimeLatest; ins: RegimeInsights }) {
         ].map(([t, v]) => (
           <div key={t as string} className="absolute top-0 h-9" style={{ left: at(v as number) }}>
             <div className="h-full w-px" style={{ background: 'var(--ink-3)' }} />
-            <span className="num absolute -top-5 -translate-x-1/2 whitespace-nowrap text-[11px]" style={{ color: 'var(--ink-3)' }}>
+            <span
+              className={`num absolute -top-5 whitespace-nowrap text-[11px] ${
+                (Math.min((v as number) ?? 0, max) / max) > 0.75 ? '-translate-x-full' : '-translate-x-1/2'
+              }`}
+              style={{ color: 'var(--ink-3)' }}
+            >
               {t} {num(v as number, 0)}d
             </span>
           </div>
@@ -340,11 +351,11 @@ function SpellCard({ l, ins }: { l: RegimeLatest; ins: RegimeInsights }) {
             Of past {label} spells that reached day {cur.days},{' '}
             <strong className="num">{pct(cur.continued_share, 0)}</strong> lasted at least another day.
           </>
+        ) : cur.longer_than_share === 1 ? (
+          <>This spell is already longer than every past {label} spell.</>
         ) : (
           <>Not enough completed spells to compare.</>
-        )}{' '}
-        The model's own estimate for the expected spell length is{' '}
-        <span className="num">{days(l.expected_remaining_duration)}</span>.
+        )}
       </Paragraph>
       <div className="eyebrow mb-1">When {label} ends, the market usually moves to</div>
       {exits.map(([to, share]) => (
@@ -394,7 +405,7 @@ function ForecastCard({ l }: { l: RegimeLatest }) {
         From the model's switching rates. These describe how risky the coming days may be, not which
         way UVXY moves.
       </Text>
-      <Table
+      <Table scroll={{ x: true }}
         className="mt-3"
         rowKey="horizon"
         size="small"
