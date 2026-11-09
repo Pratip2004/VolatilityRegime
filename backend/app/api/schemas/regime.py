@@ -112,6 +112,8 @@ class HistoryRow(_Model):
     vix: float
     contango: float
     uvxy_close: float | None
+    days_in_regime: int
+    uvxy_next_ret: float | None
 
 
 class RegimeHistory(_Model):
@@ -259,3 +261,59 @@ class FoldInfo(_Model):
     features: list[str]
     label_contango: dict[str, float]
     transmat: list[list[float]] | None = None
+
+
+class RegimeEpisode(_Model):
+    regime: str
+    start: str
+    end: str
+    days: int
+    ongoing: bool
+    in_sample: bool
+    previous_regime: str | None
+    next_regime: str | None
+    vix_start: float | None
+    vix_peak: float | None
+    vix_end: float | None
+    uvxy_change: float | None
+    spx_change: float | None
+
+
+class CurrentSpell(RegimeEpisode):
+    longer_than_share: float | None
+    continued_share: float | None
+
+
+class RegimeProfile(_Model):
+    share_of_days: float
+    days: int
+    spells: int
+    spell_median: float | None
+    spell_mean: float | None
+    spell_p75: float | None
+    spell_p90: float | None
+    spell_max: int | None
+    spell_lengths: list[int]
+    exit_to: Probabilities
+    vix_median: float | None
+    vix_p10: float | None
+    vix_p90: float | None
+    contango_median: float | None
+    risk: RiskStats
+
+
+class YearShare(_Model):
+    year: int
+    days: int
+    in_sample: bool
+    shares: Probabilities
+
+
+class RegimeInsights(_Model):
+    names: list[str]
+    as_of: str
+    oos_start: str | None
+    profiles: dict[str, RegimeProfile]
+    current: CurrentSpell
+    episodes: list[RegimeEpisode]
+    yearly: list[YearShare]

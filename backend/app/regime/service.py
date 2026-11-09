@@ -42,6 +42,7 @@ from app.regime.features import build_features
 from app.regime.hmm_model import RegimeModel, fit_regime_model, prob_column
 from app.regime.risk_stats import (
     empirical_transition_matrix,
+    next_day_returns,
     regime_vix_params,
     risk_stats_by_regime,
 )
@@ -144,6 +145,9 @@ def _train_into(settings: Settings, out: Path, t0: float, n_jobs: int) -> dict:
     live["baseline_label"] = baseline_labels(feats, cfg.baseline)
     live = live.join(feats)
 
+    # Next-day UVXY return (close t -> close t+1 on the panel calendar): a historical outcome
+    # shown in the date-wise table and insights, never a model input.
+    hist["uvxy_next_ret"] = next_day_returns(panel["uvxy_close"]).reindex(hist.index)
     hist.to_parquet(out / "history.parquet")
     live.to_parquet(out / "live.parquet")
 

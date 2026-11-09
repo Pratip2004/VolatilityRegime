@@ -14,6 +14,7 @@ from app.api.schemas.regime import (
     RegimeDiagnostics,
     RegimeHindsight,
     RegimeHistory,
+    RegimeInsights,
     RegimeLatest,
     RegimeVixParams,
     TrainStatus,
@@ -22,6 +23,7 @@ from app.api.schemas.regime import (
 from app.core.config import Settings, get_settings
 from app.regime import service
 from app.regime.hmm_model import prob_column
+from app.regime.insights import build_insights, next_day_returns
 
 router = APIRouter(prefix="/api/regime", tags=["regime"])
 SettingsDep = Annotated[Settings, Depends(get_settings)]
@@ -163,8 +165,10 @@ def history(
             "vix": float(vix),
             "contango": float(cont),
             "uvxy_close": float(u) if np.isfinite(u) else None,
+            "days_in_regime": int(dir_),
+            "uvxy_next_ret": float(nr) if np.isfinite(nr) else None,
         }
-        for d, p, raw, sm, base, ins, fid, vix, cont, u in zip(
+        for d, p, raw, sm, base, ins, fid, vix, cont, u, dir_, nr in zip(
             hist.index,
             probs,
             hist["raw_label"],
@@ -175,6 +179,8 @@ def history(
             hist["vix"],
             hist["contango"],
             uvxy,
+            hist["days_in_regime"],
+            next_day_returns(hist).to_numpy(dtype=float),
             strict=True,
         )
     ]
@@ -277,3 +283,16 @@ def simulator_overrides(p: dict) -> dict | None:
     if any(v is None for v in vals.values()):
         return None
     return {"model": "one_factor", "overrides": {k: float(v) for k, v in vals.items()}}
+
+
+@router.get("/insights", response_model=RegimeInsights)
+def insights(settings: SettingsDep) -> dict:
+    """Per-regime profiles, today's spell, every past episode and time spent per year
+    (HMM smoothed labels)."""
+    try:
+        hist = service.load_frame("history", settings)
+        risk = service.load_json("risk_stats", settings)
+        names = list(service.load_live_model(settings).names)
+    except service.NotTrainedError as exc:
+        raise _not_trained(exc) from exc
+    return build_insights(hist, names, risk["hmm"], settings.regime.first_train_end)

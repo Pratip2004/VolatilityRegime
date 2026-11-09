@@ -221,3 +221,23 @@ def test_history_with_two_states(tmp_path, monkeypatch_module) -> None:
     assert h["names"] == ["Calm", "Panic"]
     assert set(h["rows"][0]["probabilities"]) == {"Calm", "Panic"}
     assert c.get("/api/regime/latest").status_code == 200
+
+
+def test_insights_endpoint(client, trained) -> None:
+    r = client.get("/api/regime/insights")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["names"] == ["Calm", "Stressed", "Panic"]
+    assert set(d["profiles"]) == {"Calm", "Stressed", "Panic"}
+    assert d["current"]["ongoing"] is True
+    assert sum(e["days"] for e in d["episodes"]) == len(
+        client.get("/api/regime/history").json()["rows"]
+    )
+    assert all(abs(sum(y["shares"].values()) - 1) < 1e-9 for y in d["yearly"])
+
+
+def test_history_rows_have_outcome_fields(client, trained) -> None:
+    rows = client.get("/api/regime/history").json()["rows"]
+    assert rows[0]["days_in_regime"] >= 1
+    assert rows[-1]["uvxy_next_ret"] is None  # no next day yet
+    assert any(r["uvxy_next_ret"] is not None for r in rows)
