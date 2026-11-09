@@ -1,0 +1,11 @@
+.vscode
+.venv
+.env
+__pycache__/
+*.pyc
+backend/data/
+node_modules/
+client/dist/
+*.tsbuildinfo
+.pytest_cache/
+.ruff_cache/
