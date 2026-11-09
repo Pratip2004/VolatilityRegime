@@ -18,7 +18,7 @@ from pathlib import Path
 
 import joblib
 import pandas as pd
-from joblib import Parallel, delayed
+from joblib import Parallel, delayed, parallel_config
 
 from app.core.config import RegimeConfig
 from app.regime.artifacts import write_json
@@ -90,7 +90,8 @@ def run_walk_forward(
     features: pd.DataFrame,
     cfg: RegimeConfig,
     out_dir: Path | None = None,
-    n_jobs: int = -1,
+    n_jobs: int = 1,
+    blas_threads: int = 1,
 ) -> tuple[pd.DataFrame, list[dict], dict[str, RegimeModel]]:
     """Returns (history, fold metadata, models by fold id).
 
@@ -100,7 +101,9 @@ def run_walk_forward(
     folds = fold_schedule(features.index, cfg.first_train_end, cfg.refit_freq)
     if not folds:
         raise ValueError("no walk-forward folds: not enough data after first_train_end")
-    results = Parallel(n_jobs=n_jobs)(delayed(_fit_fold)(features, f, cfg) for f in folds)
+    # Cap BLAS threads inside each worker to avoid n_jobs x n_cores thread oversubscription.
+    with parallel_config(backend="loky", inner_max_num_threads=blas_threads):
+        results = Parallel(n_jobs=n_jobs)(delayed(_fit_fold)(features, f, cfg) for f in folds)
 
     parts: list[pd.DataFrame] = []
     metas: list[dict] = []

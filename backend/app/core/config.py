@@ -34,6 +34,14 @@ class ValidationConfig(BaseModel):
     pass_share: float = 0.5  # known episode "pass" if >= this share flagged Stressed/Panic
 
 
+class JumpConfig(BaseModel):
+    """Jump detection for spot-VIX calibration; same defaults as the Monte Carlo simulator."""
+
+    threshold_k: float = 3.0
+    side: Literal["up", "both"] = "up"
+    max_iter: int = 10
+
+
 class RegimeConfig(BaseModel):
     features: list[str] = Field(default_factory=lambda: list(ALL_FEATURES))
     n_states: int = 3
@@ -51,6 +59,7 @@ class RegimeConfig(BaseModel):
     hysteresis: HysteresisConfig = Field(default_factory=HysteresisConfig)
     baseline: BaselineConfig = Field(default_factory=BaselineConfig)
     validation: ValidationConfig = Field(default_factory=ValidationConfig)
+    jump: JumpConfig = Field(default_factory=JumpConfig)
 
     @field_validator("n_states")
     @classmethod
@@ -76,8 +85,20 @@ class Settings(BaseSettings):
     data_dir: Path = BACKEND_DIR / "data"
     data_start: str = "2007-01-01"
     http_timeout: float = 30.0
+    # Training parallelism. Each worker process needs ~200 MB and BLAS is pinned to
+    # ``train_blas_threads`` per worker, so peak CPU threads = n_jobs * blas_threads.
+    # Keep this modest on small machines (e.g. WSL with ~6 GB RAM): n_jobs=-1 on 12 cores
+    # exhausted memory and stalled the host.
+    train_n_jobs: int = Field(default=4, ge=1, le=32)
+    train_blas_threads: int = Field(default=1, ge=1, le=16)
     cors_origins: list[str] = Field(
-        default_factory=lambda: ["http://localhost:5174", "http://127.0.0.1:5174"]
+        # 5174: this client; 5173: the Monte Carlo simulator's client ("Use today's regime").
+        default_factory=lambda: [
+            "http://localhost:5174",
+            "http://127.0.0.1:5174",
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+        ]
     )
     regime: RegimeConfig = Field(default_factory=RegimeConfig)
 
