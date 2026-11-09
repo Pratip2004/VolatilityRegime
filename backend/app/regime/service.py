@@ -1,0 +1,218 @@
+"""Regime detector orchestration: training pipeline, artifact persistence and read helpers.
+
+``train()`` runs: features → walk-forward (all folds) → live fit on all data → risk stats →
+per-regime spot-VIX parameters → validation. Artifacts in ``data/processed/regime/``:
+
+- ``fold_<train_end>.joblib`` / ``.json``  every walk-forward fold
+- ``live_model.joblib`` / ``live_model.json``  model fitted on all data
+- ``history.parquet``      walk-forward history (2008-2013 in-sample, 2014+ out-of-sample)
+- ``live.parquet``         live-model filtered + hindsight-smoothed probabilities, labels
+- ``risk_stats.json``      next-day UVXY stats per regime (out-of-sample, smoothed HMM labels)
+- ``vix_params.json``      per-regime spot-VIX process parameters for the Monte Carlo simulator
+- ``validation.json``      validation results
+- ``train_summary.json``   last training run summary
+
+Run: ``python -m app.regime.service``
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import threading
+import time
+from datetime import UTC, datetime
+from pathlib import Path
+
+import joblib
+import numpy as np
+import pandas as pd
+
+from app.core.config import Settings, get_settings
+from app.data.build_dataset import load_panel
+from app.montecarlo.calibration import calibrate_spot_vix
+from app.regime.baseline import baseline_labels
+from app.regime.features import build_features
+from app.regime.hmm_model import RegimeModel, fit_regime_model, prob_column
+from app.regime.risk_stats import (
+    empirical_transition_matrix,
+    regime_vix_params,
+    risk_stats_by_regime,
+)
+from app.regime.validation import run_validation
+from app.regime.walk_forward import label_history, run_walk_forward
+
+log = logging.getLogger(__name__)
+_train_lock = threading.Lock()
+
+
+class NotTrainedError(RuntimeError):
+    """Raised when artifacts are requested before ``train()`` has run."""
+
+
+def _json_default(o):
+    if isinstance(o, np.integer):
+        return int(o)
+    if isinstance(o, np.floating):
+        return None if not np.isfinite(o) else float(o)
+    if isinstance(o, pd.Timestamp):
+        return o.date().isoformat()
+    if isinstance(o, np.ndarray):
+        return o.tolist()
+    raise TypeError(f"not JSON serialisable: {type(o)}")
+
+
+def _clean(o):
+    """Replace non-finite floats with None so the JSON is strict."""
+    if isinstance(o, dict):
+        return {k: _clean(v) for k, v in o.items()}
+    if isinstance(o, list | tuple):
+        return [_clean(v) for v in o]
+    if isinstance(o, float) and not np.isfinite(o):
+        return None
+    return o
+
+
+def write_json(path: Path, obj) -> None:
+    path.write_text(json.dumps(_clean(obj), indent=2, default=_json_default))
+
+
+def read_json(path: Path):
+    if not path.exists():
+        raise NotTrainedError(f"{path.name} missing: train the regime model first")
+    return json.loads(path.read_text())
+
+
+def train(settings: Settings | None = None, n_jobs: int = -1) -> dict:
+    """Full retrain. Thread-safe: concurrent calls wait for the running one."""
+    with _train_lock:
+        return _train(settings or get_settings(), n_jobs)
+
+
+def _train(settings: Settings, n_jobs: int) -> dict:
+    t0 = time.perf_counter()
+    cfg = settings.regime
+    out = settings.regime_dir
+    out.mkdir(parents=True, exist_ok=True)
+    for old in out.glob("fold_*"):
+        old.unlink()
+
+    feats = build_features(load_panel(), cfg)
+    hist, fold_meta, models = run_walk_forward(feats, cfg, out_dir=out, n_jobs=n_jobs)
+    names = list(next(iter(models.values())).names)
+
+    # Live model on all data.
+    t_live = time.perf_counter()
+    live_model = fit_regime_model(feats, cfg)
+    live_runtime = time.perf_counter() - t_live
+    joblib.dump(live_model, out / "live_model.joblib")
+    write_json(out / "live_model.json", live_model.metadata() | {"runtime_s": live_runtime})
+
+    live = live_model.filtered_proba(feats)
+    pcols = [prob_column(n) for n in names]
+    live = label_history(live, names, pcols, cfg)
+    smoothed = live_model.smoothed_proba(feats)
+    for c in pcols:
+        live[f"hs_{c}"] = smoothed[c]  # hindsight (smoothed) view: diagnostics only
+    live["baseline_label"] = baseline_labels(feats, cfg.baseline)
+    live = live.join(feats)
+
+    hist.to_parquet(out / "history.parquet")
+    live.to_parquet(out / "live.parquet")
+
+    oos = hist[~hist["in_sample"]]
+    risk = {
+        "hmm": risk_stats_by_regime(oos["smoothed_label"], hist["uvxy_close"], names),
+        "baseline": risk_stats_by_regime(oos["baseline_label"], hist["uvxy_close"], names),
+        "empirical_transition": empirical_transition_matrix(oos["smoothed_label"], names)
+        .round(6)
+        .to_dict(orient="index"),
+        "period": {
+            "start": oos.index.min().date().isoformat(),
+            "end": oos.index.max().date().isoformat(),
+        },
+    }
+    write_json(out / "risk_stats.json", risk)
+
+    vix_params = {
+        "model": "log-OU: d ln VIX = kappa (ln theta - ln VIX) dt + sigma dW, dt = 1/252",
+        "source": "out-of-sample smoothed HMM labels",
+        "all_days": calibrate_spot_vix(oos["vix"]),
+        "by_regime": regime_vix_params(oos["vix"], oos["smoothed_label"]),
+    }
+    write_json(out / "vix_params.json", vix_params)
+
+    validation = run_validation(hist, names, cfg)
+    write_json(out / "validation.json", validation)
+
+    summary = {
+        "trained_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "runtime_s": round(time.perf_counter() - t0, 2),
+        "n_folds": len(fold_meta),
+        "refit_freq": cfg.refit_freq,
+        "features": cfg.features,
+        "data_start": feats.index.min().date().isoformat(),
+        "data_end": feats.index.max().date().isoformat(),
+        "folds": [
+            {
+                "fold_id": m["fold_id"],
+                "train_start": m["train_start"],
+                "train_end": m["train_end"],
+                "test_start": m.get("test_start"),
+                "test_end": m.get("test_end"),
+                "n_train": m["n_train"],
+                "log_likelihood": m["log_likelihood"],
+                "runtime_s": m.get("runtime_s"),
+            }
+            for m in fold_meta
+        ],
+        "live": {
+            "train_end": live_model.train_end,
+            "log_likelihood": live_model.log_likelihood,
+            "runtime_s": round(live_runtime, 2),
+        },
+    }
+    write_json(out / "train_summary.json", summary)
+    log.info("regime training done in %.1fs", summary["runtime_s"])
+    return summary
+
+
+# ---------------------------------------------------------------------------- loaders
+def _dir(settings: Settings | None) -> Path:
+    return (settings or get_settings()).regime_dir
+
+
+def load_live_model(settings: Settings | None = None) -> RegimeModel:
+    path = _dir(settings) / "live_model.joblib"
+    if not path.exists():
+        raise NotTrainedError("live model missing: train the regime model first")
+    return joblib.load(path)
+
+
+def load_frame(name: str, settings: Settings | None = None) -> pd.DataFrame:
+    path = _dir(settings) / f"{name}.parquet"
+    if not path.exists():
+        raise NotTrainedError(f"{name}.parquet missing: train the regime model first")
+    return pd.read_parquet(path)
+
+
+def load_json(name: str, settings: Settings | None = None):
+    return read_json(_dir(settings) / f"{name}.json")
+
+
+def load_folds(settings: Settings | None = None) -> list[dict]:
+    d = _dir(settings)
+    files = sorted(d.glob("fold_*.json"))
+    if not files:
+        raise NotTrainedError("no folds: train the regime model first")
+    return [json.loads(f.read_text()) for f in files]
+
+
+def main() -> None:
+    logging.basicConfig(level=logging.INFO)
+    summary = train()
+    print(json.dumps(_clean(summary), indent=2, default=_json_default))
+
+
+if __name__ == "__main__":
+    main()
