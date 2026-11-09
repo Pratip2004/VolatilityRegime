@@ -277,3 +277,14 @@ def test_service_train_writes_full_artifact_set(tmp_path, monkeypatch) -> None:
     (s.regime_dir / "fold_1999-12-31.json").write_text("{}")
     service.train(s, n_jobs=1)
     assert not (s.regime_dir / "fold_1999-12-31.json").exists()
+
+
+def test_compare_ties_noise_and_flags_shared_failures() -> None:
+    from app.regime.validation import compare
+
+    assert compare(0.088, 0.083, True) == "tie"  # within 10%
+    assert compare(0.615, 0.410, True) == "hmm"
+    assert compare(58.7, 41.8, False) == "baseline"
+    assert compare(-0.0009, -0.0022, True, must_be_positive=True) == "neither"
+    assert compare(0.001, -0.002, True, must_be_positive=True) == "hmm"
+    assert compare(None, 1.0, True) is None

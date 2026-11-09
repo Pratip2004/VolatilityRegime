@@ -242,10 +242,31 @@ def load_folds(settings: Settings | None = None) -> list[dict]:
     return [json.loads(f.read_text()) for f in files]
 
 
+def revalidate(settings: Settings | None = None) -> dict:
+    """Recompute ``validation.json`` from the saved walk-forward history without refitting."""
+    settings = settings or get_settings()
+    with _training_lock(settings, blocking=True):
+        hist = load_frame("history", settings)
+        names = list(load_live_model(settings).names)
+        panel = load_panel().set_index("date").sort_index()
+        validation = run_validation(hist, names, settings.regime, uvxy_close=panel["uvxy_close"])
+        write_json(settings.regime_dir / "validation.json", validation)
+        return validation
+
+
 def main() -> None:
+    import argparse
+
     logging.basicConfig(level=logging.INFO)
-    summary = train()
-    print(json.dumps(_clean(summary), indent=2, default=_json_default))
+    parser = argparse.ArgumentParser(description="Train the regime detector")
+    parser.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="recompute validation.json from saved history without refitting",
+    )
+    args = parser.parse_args()
+    result = {"summary": revalidate()["summary"]} if args.validate_only else train()
+    print(json.dumps(_clean(result), indent=2, default=_json_default))
 
 
 if __name__ == "__main__":

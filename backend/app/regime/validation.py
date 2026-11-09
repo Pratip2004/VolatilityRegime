@@ -165,17 +165,36 @@ def run_validation(
     return result
 
 
+TIE_RELATIVE_TOLERANCE = 0.10
+
+
+def compare(
+    hmm: float | None,
+    base: float | None,
+    higher_is_better: bool,
+    must_be_positive: bool = False,
+    tol: float = TIE_RELATIVE_TOLERANCE,
+) -> str | None:
+    """``hmm`` / ``baseline`` / ``tie`` / ``neither`` (both fail a required sign) / None.
+
+    Differences within ``tol`` of the larger magnitude count as a tie, so noise-level gaps
+    are not reported as wins.
+    """
+    if hmm is None or base is None:
+        return None
+    if must_be_positive and hmm <= 0 and base <= 0:
+        return "neither"
+    if abs(hmm - base) <= tol * max(abs(hmm), abs(base), 1e-12):
+        return "tie"
+    return "hmm" if (hmm > base) == higher_is_better else "baseline"
+
+
 def summarize(r: dict) -> list[dict]:
     """HMM vs baseline on each check: ``{check, hmm, baseline, better}``."""
     rows = []
 
-    def add(check: str, hmm, base, higher_is_better: bool | None) -> None:
-        better = None
-        if hmm is not None and base is not None and higher_is_better is not None:
-            if abs(hmm - base) > 1e-9:
-                better = "hmm" if (hmm > base) == higher_is_better else "baseline"
-            else:
-                better = "tie"
+    def add(check: str, hmm, base, higher_is_better: bool, must_be_positive: bool = False) -> None:
+        better = compare(hmm, base, higher_is_better, must_be_positive)
         rows.append({"check": check, "hmm": hmm, "baseline": base, "better": better})
 
     oos_eps = [e for e in r["known_episodes"] if not e["in_sample"]]
@@ -219,6 +238,7 @@ def summarize(r: dict) -> list[dict]:
         panic_minus_calm("hmm"),
         panic_minus_calm("baseline"),
         True,
+        must_be_positive=True,
     )
     st = r["stability"]
     add(
