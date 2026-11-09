@@ -2,8 +2,8 @@
 
 Rules (thresholds from ``HysteresisConfig``):
 - Enter Panic when ``p_panic >= enter_panic``.
-- While in Panic, stay until ``p_panic < exit_panic``; then go to Calm if ``p_calm >=
-  enter_calm``, otherwise Stressed (the conservative choice).
+- While in Panic, stay until ``p_panic < exit_panic``; then go to the most likely non-Panic
+  regime that clears its threshold, otherwise Stressed (the conservative choice).
 - Switch to Calm / Stressed only when that regime's probability is >= its threshold.
 - Otherwise keep the previous smoothed label. The first day takes the raw label.
 """
@@ -39,8 +39,15 @@ def smooth_labels(
     enter.update({"Calm": cfg.enter_calm, "Stressed": cfg.enter_stressed})
     has_panic = PANIC in names
     panic_i = names.index(PANIC) if has_panic else -1
-    calm_i = names.index("Calm") if "Calm" in names else -1
     fallback_exit = "Stressed" if "Stressed" in names else names[0]
+
+    def best_non_panic(row: np.ndarray, exclude: str | None) -> str | None:
+        """Highest-probability non-Panic regime (other than ``exclude``) clearing its threshold."""
+        for i in np.argsort(-row, kind="stable"):
+            n = names[i]
+            if n != PANIC and n != exclude and row[i] >= enter[n]:
+                return n
+        return None
 
     out: list[str] = []
     prev = initial
@@ -51,20 +58,12 @@ def smooth_labels(
         elif prev == PANIC:
             if row[panic_i] >= cfg.exit_panic:
                 label = PANIC
-            elif calm_i >= 0 and row[calm_i] >= cfg.enter_calm:
-                label = "Calm"
             else:
-                label = fallback_exit
+                label = best_non_panic(row, None) or fallback_exit
         elif has_panic and row[panic_i] >= cfg.enter_panic:
             label = PANIC
         else:
-            label = prev
-            # Highest-probability non-Panic regime that clears its threshold.
-            for i in np.argsort(-row):
-                n = names[i]
-                if n != PANIC and n != prev and row[i] >= enter[n]:
-                    label = n
-                    break
+            label = best_non_panic(row, prev) or prev
         out.append(label)
         prev = label
     return pd.Series(out, index=probs.index, name="smoothed_label", dtype=object)

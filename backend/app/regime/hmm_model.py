@@ -100,9 +100,11 @@ def fit_hmm_restarts(
             tol=cfg.tol,
             random_state=seed,
         )
+        hmm_log = logging.getLogger("hmmlearn")
+        old_level = hmm_log.level
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            logging.getLogger("hmmlearn").setLevel(logging.ERROR)
+            hmm_log.setLevel(logging.ERROR)
             try:
                 model.fit(x)
                 score = float(model.score(x))
@@ -110,6 +112,8 @@ def fit_hmm_restarts(
                 log.warning("restart seed=%d failed: %s", seed, exc)
                 restarts.append({"seed": seed, "log_likelihood": None, "converged": False})
                 continue
+            finally:
+                hmm_log.setLevel(old_level)
         converged = bool(model.monitor_.converged)
         restarts.append({"seed": seed, "log_likelihood": score, "converged": converged})
         log.info("HMM restart seed=%d loglik=%.2f converged=%s", seed, score, converged)

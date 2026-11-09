@@ -222,3 +222,38 @@ def test_baseline_rules() -> None:
     )
     # backwardation; contango 6% & ratio .83; contango 6% & ratio .975; contango 2.5%
     assert baseline_labels(df).tolist() == ["Panic", "Calm", "Stressed", "Stressed"]
+
+
+def test_four_state_panic_exit_goes_to_elevated() -> None:
+    names4 = ("Calm", "Elevated", "Stressed", "Panic")
+    p = pd.DataFrame(
+        [(0.0, 0.0, 0.1, 0.9), (0.05, 0.65, 0.0, 0.30), (0.05, 0.3, 0.3, 0.35)],
+        columns=["p_calm", "p_elevated", "p_stressed", "p_panic"],
+    )
+    assert smooth_labels(p, names4).tolist() == ["Panic", "Elevated", "Elevated"]
+    q = p.iloc[[0, 2]]
+    assert smooth_labels(q, names4).tolist() == ["Panic", "Stressed"]
+
+
+def test_direct_transitions() -> None:
+    p = _probs([(0.1, 0.8, 0.1), (0.7, 0.2, 0.1), (0.1, 0.1, 0.8)])
+    assert smooth_labels(p, NAMES).tolist() == ["Stressed", "Calm", "Panic"]
+
+
+def test_forward_filter_matches_hmmlearn_at_several_days() -> None:
+    hmm = _true_hmm()
+    x, _ = hmm.sample(300, random_state=11)
+    la = forward_filter(x, hmm.startprob_, hmm.transmat_, hmm.means_, hmm.covars_)
+    for t in (0, 10, 150, 299):
+        np.testing.assert_allclose(np.exp(la[t]), hmm.predict_proba(x[: t + 1])[-1], atol=1e-8)
+
+
+def test_label_states_fallback_for_state_that_never_wins() -> None:
+    hmm = _true_hmm()
+    x, z = hmm.sample(500, random_state=2)
+    # Only feed observations from state 0 → states 1 and 2 never win the filter argmax.
+    x0 = np.repeat(hmm.means_[[0]], 50, axis=0)
+    contango = np.full(50, 0.1)
+    order, lc = label_states(hmm, x0, contango, NAMES, np.array([0.1, 0.05, -0.02]))
+    assert order == [0, 1, 2]
+    assert lc == pytest.approx({"Calm": 0.1, "Stressed": 0.05, "Panic": -0.02})
